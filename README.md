@@ -19,9 +19,11 @@ synced with backup support.
 
 ## 📥 Download Latest APK
 
-Get the latest Android build from GitHub Releases.
-
-[⬇️ Download Latest Version](../../releases/latest)
+<p align="center">
+  <a href="../../releases/latest">
+    <img src="https://img.shields.io/badge/Download-Latest%20APK-green?style=for-the-badge&logo=android">
+  </a>
+</p>
 
 ---
 
