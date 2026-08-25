@@ -35,8 +35,8 @@ Get the latest Android build from GitHub Releases.
 
 <p align="center">
 <img src="screenshots/Stats.png" width="220">
-<img src="screenshots/Settings.png" width="220">
 <img src="screenshots/Person.png" width="220">
+<img src="screenshots/Settings.png" width="220">
 </p>
 
 ## 🚀 Features
@@ -80,14 +80,6 @@ Get the latest Android build from GitHub Releases.
 - Android Dynamic Color support
 - Glass style UI elements
 - Optimized performance
-
----
-
-## 📱 Screenshots
-
-| Discover | Details | Home  |
-| -------- | ------- | ----- |
-| image    | image   | image |
 
 ---
 
