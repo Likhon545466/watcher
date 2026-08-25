@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -36,7 +36,7 @@ jobs:
           cache: true
 
       # Install dependencies
-      - name: Install dependencies
+      - name: Flutter Pub Get
         run: flutter pub get
 
       # Read version from pubspec.yaml
@@ -65,25 +65,9 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk \
           release/Watcher-v${{ steps.version.outputs.version_name }}-build${{ steps.version.outputs.build_number }}.apk
 
-      # Upload Artifact
+      # Upload APK Artifact
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Watcher-v${{ steps.version.outputs.version_name }}-build${{ steps.version.outputs.build_number }}
           path: release/*.apk
-
-      # Create GitHub Release
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.build_number }}
-          name: Watcher v${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.build_number }}
-          body: |
-            Automated APK build from GitHub Actions.
-
-            Version:
-            v${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.build_number }}
-          files: |
-            release/*.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
