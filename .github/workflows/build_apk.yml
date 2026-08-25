@@ -2,7 +2,7 @@ name: Build Flutter APK
 
 on:
   push:
-    branches: ["main"] # অথবা আপনার ব্রাঞ্চের নাম যেমন master হলে master দিন
+    branches: ["main"]
 
 jobs:
   build:
@@ -13,7 +13,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           distribution: "zulu"
           java-version: "17"
@@ -21,14 +21,15 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.19.x" # আপনার ফ্লাটার ভার্সন এখানে দিতে পারেন (যেমন: '3.x.x')
+          flutter-version: "3.19.x"
           channel: "stable"
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build Release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --verbose
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
