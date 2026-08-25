@@ -1,7 +1,7 @@
 # 🎬 Watcher
 
 <p align="center">
-  <img src="assets/banner.png">
+  <img src="assets/logo.png">
 </p>
 
 <p align="center">
