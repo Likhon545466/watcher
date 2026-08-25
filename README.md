@@ -29,9 +29,12 @@ Get the latest Android build from GitHub Releases.
 
 <p align="center">
 <img src="screenshots/Home.png" width="220">
-<img src="screenshots/Details.png" width="220">
 <img src="screenshots/Discover.png" width="220">
-<img src="screenshots/Stats.png" width="220">
+<img src="screenshots/Details.png" width="220">
+</p>
+
+<p align="center">
+<img src="screenshots/Statistics.png" width="220">
 <img src="screenshots/Settings.png" width="220">
 </p>
 
