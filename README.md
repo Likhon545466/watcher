@@ -1,31 +1,105 @@
-# Watcher
+# 🎬 Watcher
 
-A Flutter movie and series tracker with an elegant, modern UI that helps you discover, track, and manage your watchlist seamlessly.
+<p align="center">
+  <img src="assets/banner.png">
+</p>
 
-## ## Features & Included
+<p align="center">
+  A modern Flutter movie & series tracker with smart discovery, progress tracking, and cloud backup.
+</p>
 
-- **OMDb & TMDB Integration:** Online search, trending titles, upcoming releases, and full-detail imports.
-- **Dedicated Discover View:** Explore Trending Today, New Releases, and Upcoming movies/series with detailed views.
-- **Duplicate Protection:** Prevents adding duplicate titles to your watchlist.
-- **Movie/Series Status Filters:** Organize by Plan to Watch, Watching, Completed, etc.
-- **Progress Tracking:** Series season and episode progress tracking with OMDb season limits.
-- **Detailed Title Page:** Detailed overview with edit, delete, status controls, and cast/crew metadata.
-- **Statistics:** Watch-time calculations and dynamic watch analytics.
-- **Theming & Design:** Light, dark, system, and Android dynamic color themes with Glassmorphism components.
-- **Data Backup:** TXT/JSON backup export and import with migration support for older data models.
+---
 
-## ## Screenshots
+## ✨ Overview
 
-|              Discover & Trending               |                   Discover Details                   |            Watchlist / Home            |
-| :--------------------------------------------: | :--------------------------------------------------: | :------------------------------------: |
-| ![Discover](./assets/screenshots/discover.png) | ![Details](./assets/screenshots/discover_detail.png) | ![Home](./assets/screenshots/home.png) |
+Watcher is a personal movie and series management app built with Flutter.
 
-> _Note: Place your screenshot images inside an `assets/screenshots/` folder or drag-and-drop them directly into the GitHub README editor._
+It helps you discover new titles, organize your watchlist, track episode progress, and keep your collection synced with backup support.
 
-## ## Run
+---
+
+## 🚀 Features
+
+### 🔎 Smart Discovery
+
+- Trending movies and series
+- New releases
+- Upcoming releases
+- Genre-based browsing
+- Search with detailed metadata
+
+### 🎬 Watch Management
+
+- Plan to Watch
+- Watching
+- Completed
+- On Hold
+- Progress tracking for seasons and episodes
+- Automatic completion handling
+
+### 📚 Detailed Information
+
+- Movie & series details
+- Cast and directors
+- Person profiles with filmography
+- Similar titles recommendation
+- Multiple backdrop support
+
+### ☁️ Backup & Sync
+
+- Google Drive backup
+- Restore data
+- Automatic backup support
+- Local data protection
+
+### 🎨 UI & Experience
+
+- Material 3 design
+- Light / Dark / System theme
+- Android Dynamic Color support
+- Glass style UI elements
+- Optimized performance
+
+---
+
+## 📱 Screenshots
+
+| Discover | Details | Home  |
+| -------- | ------- | ----- |
+| image    | image   | image |
+
+---
+
+## 🛠 Tech Stack
+
+| Technology       | Usage                 |
+| ---------------- | --------------------- |
+| Flutter          | Application framework |
+| Dart             | Programming language  |
+| TMDB API         | Movie & series data   |
+| OMDb API         | Additional metadata   |
+| SQLite           | Local storage         |
+| Google Drive API | Backup system         |
+| Material 3       | UI design             |
+
+---
+
+## 📦 Installation
+
+### Requirements
+
+- Flutter SDK
+- Android Studio
+- Android SDK
+
+### Run
 
 ```bash
-flutter clean
+git clone https://github.com/yourname/watcher.git
+
+cd watcher
+
 flutter pub get
+
 flutter run
 ```
