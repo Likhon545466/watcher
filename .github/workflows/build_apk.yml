@@ -7,13 +7,16 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Release APK
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout source
+      # Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -32,25 +35,26 @@ jobs:
           channel: stable
           cache: true
 
-      # Install packages
-      - name: Flutter Pub Get
+      # Install dependencies
+      - name: Install dependencies
         run: flutter pub get
 
-      # Read version
+      # Read version from pubspec.yaml
       - name: Read App Version
         id: version
         shell: bash
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
-          NAME=${VERSION%%+*}
-          BUILD=${VERSION##*+}
 
-          echo "version_name=$NAME" >> $GITHUB_OUTPUT
-          echo "build_number=$BUILD" >> $GITHUB_OUTPUT
+          VERSION_NAME=${VERSION%%+*}
+          BUILD_NUMBER=${VERSION##*+}
+
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
 
       # Build APK
       - name: Build Release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --verbose
 
       # Rename APK
       - name: Rename APK
@@ -61,7 +65,7 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk \
           release/Watcher-v${{ steps.version.outputs.version_name }}-build${{ steps.version.outputs.build_number }}.apk
 
-      # Upload artifact
+      # Upload Artifact
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -74,6 +78,11 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.build_number }}
           name: Watcher v${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.build_number }}
+          body: |
+            Automated APK build from GitHub Actions.
+
+            Version:
+            v${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.build_number }}
           files: |
             release/*.apk
         env:
