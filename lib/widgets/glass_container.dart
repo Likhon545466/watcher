@@ -44,8 +44,7 @@ class GlassContainer extends StatelessWidget {
                   ? Colors.white.withOpacity(0.15)
                   : Colors.black.withOpacity(0.08)));
 
-    Widget content = AnimatedContainer(
-      duration: const Duration(milliseconds: 100),
+    Widget content = Container(
       padding: padding,
       margin: margin,
       decoration: BoxDecoration(
@@ -59,10 +58,10 @@ class GlassContainer extends StatelessWidget {
             boxShadow ??
             [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.2 : 0.03),
-                blurRadius: 12,
+                color: Colors.black.withOpacity(isDark ? 0.12 : 0.02),
+                blurRadius: 4,
                 spreadRadius: 0,
-                offset: const Offset(0, 4),
+                offset: const Offset(0, 2),
               ),
             ],
       ),

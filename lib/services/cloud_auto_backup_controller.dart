@@ -9,438 +9,365 @@ import '../providers/show_provider.dart';
 import 'google_drive_backup_service.dart';
 import 'storage_service.dart';
 
-// ============================================================
-// CLOUD AUTO BACKUP CONTROLLER
-// ============================================================
-
 class CloudAutoBackupController {
   CloudAutoBackupController({
     required this.showProvider,
     required this.cloudProvider,
   }) {
+    active = this;
     showProvider.addListener(_onShowProviderChanged);
-
     cloudProvider.addListener(_onCloudProviderChanged);
-
     unawaited(_initialize());
   }
 
-  // ==========================================================
-  // CONFIG
-  // ==========================================================
+  static CloudAutoBackupController? active;
 
   static const Duration _changeDetectionDelay = Duration(milliseconds: 500);
-
-  /*
-   * Auto Backup debounce.
-   *
-   * Old value was 25 seconds, which felt too slow.
-   * 6 seconds is fast enough for the user to feel instant,
-   * but still prevents Google Drive upload spam when the user
-   * quickly taps episode + / - or changes multiple items.
-   */
   static const Duration _uploadDebounce = Duration(seconds: 6);
-
-  static const Duration _retryAfterActiveUpload = Duration(seconds: 3);
+  static const Duration _retryDelay = Duration(seconds: 15);
+  static const Duration _resumeThrottle = Duration(seconds: 8);
 
   static const String _uploadedSignatureKey =
-      'cloud_auto_backup_last_uploaded_signature_v1';
-
-  // ==========================================================
-  // PROVIDERS
-  // ==========================================================
+      'cloud_auto_backup_last_uploaded_signature_v2';
 
   final ShowProvider showProvider;
-
   final CloudBackupProvider cloudProvider;
 
-  // ==========================================================
-  // STATE
-  // ==========================================================
-
   Timer? _changeDetectionTimer;
-
-  Timer? _uploadTimer;
+  Timer? _syncTimer;
 
   bool _initialized = false;
-
   bool _disposed = false;
-
-  bool _uploading = false;
-
-  bool _uploadAgain = false;
+  bool _syncing = false;
+  bool _syncAgain = false;
 
   String? _lastObservedSignature;
-
   String? _lastUploadedSignature;
-
-  String? _pendingSignature;
-
-  DateTime? _lastKnownCloudBackupAt;
-
-  // ==========================================================
-  // INITIALIZE
-  // ==========================================================
+  DateTime? _lastSyncAttemptAt;
 
   Future<void> _initialize() async {
     try {
       final preferences = await SharedPreferences.getInstance();
-
       _lastUploadedSignature = preferences.getString(_uploadedSignatureKey);
 
-      _lastKnownCloudBackupAt = cloudProvider.lastCloudBackupAt;
-
       if (!showProvider.loading) {
-        _lastObservedSignature = _createCurrentLibrarySignature();
+        _lastObservedSignature = _createCurrentStateSignature();
       }
-
-      _initialized = true;
-
-      _maybeScheduleInitialBackup();
     } catch (error) {
-      debugPrint('CloudAutoBackupController initialize error: $error');
-
+      debugPrint('Cloud sync controller initialize error: $error');
+    } finally {
       _initialized = true;
+      _maybeScheduleStartupSync();
     }
   }
 
-  // ==========================================================
-  // SHOW PROVIDER CHANGED
-  // ==========================================================
-
   void _onShowProviderChanged() {
-    if (_disposed || !_initialized || showProvider.loading) {
+    if (_disposed || !_initialized || showProvider.loading || _syncing) {
       return;
     }
 
     _changeDetectionTimer?.cancel();
-
     _changeDetectionTimer = Timer(
       _changeDetectionDelay,
       _detectActualLibraryChange,
     );
   }
 
-  // ==========================================================
-  // DETECT REAL LIBRARY CHANGE
-  // ==========================================================
-
   void _detectActualLibraryChange() {
-    if (_disposed || showProvider.loading) {
+    if (_disposed || showProvider.loading || _syncing) {
       return;
     }
 
-    final currentSignature = _createCurrentLibrarySignature();
+    final signature = _createCurrentStateSignature();
+    final previous = _lastObservedSignature;
 
-    final previousSignature = _lastObservedSignature;
-
-    // --------------------------------------------------------
-    // First completed local load becomes our baseline.
-    // It is NOT treated as a new user change.
-    // --------------------------------------------------------
-
-    if (previousSignature == null) {
-      _lastObservedSignature = currentSignature;
-
-      _maybeScheduleInitialBackup();
-
+    if (previous == null) {
+      _lastObservedSignature = signature;
+      _maybeScheduleStartupSync();
       return;
     }
 
-    // --------------------------------------------------------
-    // Search/category/filter UI changes may notify ShowProvider,
-    // but they do not change the actual library JSON.
-    // --------------------------------------------------------
-
-    if (previousSignature == currentSignature) {
+    if (previous == signature) {
       return;
     }
 
-    _lastObservedSignature = currentSignature;
+    _lastObservedSignature = signature;
 
-    if (!_canAutoBackup()) {
+    if (cloudProvider.autoSyncEnabled && _canUseCloud()) {
+      _scheduleSync(_uploadDebounce);
       return;
     }
 
-    _scheduleAutoBackup(currentSignature);
+    if (cloudProvider.autoBackupEnabled && _canUseCloud()) {
+      _scheduleBackupOnly(_uploadDebounce);
+    }
   }
-
-  // ==========================================================
-  // CLOUD PROVIDER CHANGED
-  // ==========================================================
 
   void _onCloudProviderChanged() {
     if (_disposed || !_initialized) {
       return;
     }
 
-    // --------------------------------------------------------
-    // If Backup Now was used manually, CloudBackupProvider's
-    // lastCloudBackupAt changes.
-    //
-    // Treat the current local library as the latest
-    // successfully uploaded snapshot.
-    // --------------------------------------------------------
-
-    final backupAt = cloudProvider.lastCloudBackupAt;
-
-    if (backupAt != null && backupAt != _lastKnownCloudBackupAt) {
-      _lastKnownCloudBackupAt = backupAt;
-
-      if (!showProvider.loading) {
-        final signature = _createCurrentLibrarySignature();
-
-        _lastUploadedSignature = signature;
-
-        _lastObservedSignature ??= signature;
-
-        unawaited(_persistUploadedSignature(signature));
-      }
-    }
-
-    if (!cloudProvider.autoBackupEnabled || !cloudProvider.isConnected) {
-      _uploadTimer?.cancel();
-
-      _uploadTimer = null;
-
-      _pendingSignature = null;
-
+    if (!_canUseCloud()) {
+      _syncTimer?.cancel();
+      _syncTimer = null;
       return;
     }
 
-    _maybeScheduleInitialBackup();
+    _maybeScheduleStartupSync();
   }
 
-  // ==========================================================
-  // INITIAL BACKUP
-  // ==========================================================
-
-  void _maybeScheduleInitialBackup() {
-    if (!_canAutoBackup() ||
-        showProvider.loading ||
-        cloudProvider.checkingCloudBackup ||
-        showProvider.allShows.isEmpty) {
-      return;
-    }
-
-    final currentSignature = _createCurrentLibrarySignature();
-
-    _lastObservedSignature ??= currentSignature;
-
-    if (currentSignature == _lastUploadedSignature) {
-      return;
-    }
-
-    // --------------------------------------------------------
-    // NEW DEVICE / REINSTALL SAFETY
-    // --------------------------------------------------------
-    //
-    // Existing cloud backup + no local uploaded signature
-    // usually means:
-    //
-    // - fresh install
-    // - new phone
-    // - local app data reset
-    //
-    // Never automatically overwrite the existing cloud backup.
-    // User must Restore from Cloud or manually choose Backup Now.
-    // --------------------------------------------------------
-
-    if (cloudProvider.hasCloudBackup && _lastUploadedSignature == null) {
-      return;
-    }
-
-    _scheduleAutoBackup(currentSignature);
+  bool _canUseCloud() {
+    return !_disposed && cloudProvider.initialized && cloudProvider.isConnected;
   }
 
-  // ==========================================================
-  // CAN AUTO BACKUP?
-  // ==========================================================
+  void _maybeScheduleStartupSync() {
+    if (!_canUseCloud() || showProvider.loading) {
+      return;
+    }
 
-  bool _canAutoBackup() {
-    return !_disposed &&
-        cloudProvider.initialized &&
-        cloudProvider.isConnected &&
-        cloudProvider.autoBackupEnabled;
+    if (cloudProvider.autoSyncEnabled) {
+      _scheduleSync(const Duration(milliseconds: 700));
+    }
   }
 
-  // ==========================================================
-  // SCHEDULE AUTO BACKUP
-  // ==========================================================
-
-  void _scheduleAutoBackup(String signature) {
-    if (!_canAutoBackup()) {
+  void onAppResumed() {
+    if (!_canUseCloud() || !cloudProvider.autoSyncEnabled) {
       return;
     }
 
-    if (signature == _lastUploadedSignature) {
+    final now = DateTime.now();
+
+    if (_lastSyncAttemptAt != null &&
+        now.difference(_lastSyncAttemptAt!) < _resumeThrottle) {
       return;
     }
 
-    _pendingSignature = signature;
+    _scheduleSync(const Duration(milliseconds: 350));
+  }
 
-    _uploadTimer?.cancel();
+  Future<bool> syncNow() async {
+    if (!_canUseCloud() || showProvider.loading) {
+      return false;
+    }
 
-    _uploadTimer = Timer(_uploadDebounce, () {
-      unawaited(_performAutoBackup());
+    return _performTwoWaySync(manual: true);
+  }
+
+  void _scheduleSync(Duration delay) {
+    _syncTimer?.cancel();
+    _syncTimer = Timer(delay, () {
+      unawaited(_performTwoWaySync());
     });
   }
 
-  // ==========================================================
-  // PERFORM AUTO BACKUP
-  // ==========================================================
+  void _scheduleBackupOnly(Duration delay) {
+    _syncTimer?.cancel();
+    _syncTimer = Timer(delay, () {
+      unawaited(_performBackupOnly());
+    });
+  }
 
-  Future<void> _performAutoBackup() async {
-    if (_disposed || !_canAutoBackup() || showProvider.loading) {
-      return;
+  Future<bool> _performTwoWaySync({bool manual = false}) async {
+    if (_disposed || !_canUseCloud() || showProvider.loading) {
+      return false;
     }
 
-    if (_uploading) {
-      _uploadAgain = true;
-
-      return;
+    if (_syncing) {
+      _syncAgain = true;
+      return false;
     }
 
-    final currentSignature = _createCurrentLibrarySignature();
-
-    if (currentSignature == _lastUploadedSignature) {
-      _pendingSignature = null;
-
-      return;
-    }
-
-    // --------------------------------------------------------
-    // Fresh-install protection again immediately before upload.
-    // --------------------------------------------------------
-
-    if (cloudProvider.hasCloudBackup &&
-        _lastUploadedSignature == null &&
-        cloudProvider.lastCloudBackupAt == null) {
-      return;
-    }
-
-    _uploading = true;
-
-    _uploadAgain = false;
+    _syncing = true;
+    _syncAgain = false;
+    _lastSyncAttemptAt = DateTime.now();
 
     try {
-      final shows = showProvider.allShows;
+      final drive = GoogleDriveBackupService.instance;
+      var snapshot = await drive.downloadBackupSnapshot();
 
-      final snapshotSignature = _createLibrarySignature(
-        shows.map((show) => show.toJson()).toList(growable: false),
+      if (snapshot != null) {
+        final cloudState = StorageService.decodeSyncBackup(snapshot.jsonData);
+        await showProvider.mergeCloudSyncState(
+          cloudState.shows,
+          cloudState.deletedShows,
+        );
+      }
+
+      // Optimistic re-check. If another device updated Drive while we were
+      // merging, pull that newer snapshot once more before our upload.
+      if (snapshot != null) {
+        final newestInfo = await drive.getBackupInfo();
+        final firstModified = snapshot.info.modifiedTime?.toUtc();
+        final newestModified = newestInfo?.modifiedTime?.toUtc();
+
+        if (firstModified != null &&
+            newestModified != null &&
+            newestModified.isAfter(firstModified)) {
+          final newerSnapshot = await drive.downloadBackupSnapshot();
+
+          if (newerSnapshot != null) {
+            final newerState = StorageService.decodeSyncBackup(
+              newerSnapshot.jsonData,
+            );
+            await showProvider.mergeCloudSyncState(
+              newerState.shows,
+              newerState.deletedShows,
+            );
+            snapshot = newerSnapshot;
+          }
+        }
+      }
+
+      final localSignature = _createCurrentStateSignature();
+      final cloudSignature = snapshot == null
+          ? null
+          : _createDecodedCloudSignature(snapshot.jsonData);
+
+      GoogleDriveBackupInfo? uploadedInfo;
+
+      if (snapshot == null || cloudSignature != localSignature) {
+        final jsonData = await StorageService.encodeSyncBackup(
+          showProvider.allShows,
+          showProvider.deletedShowTombstones,
+        );
+
+        uploadedInfo = await drive.uploadBackupJson(jsonData);
+        await cloudProvider.markCloudBackupCompleted(info: uploadedInfo);
+      }
+
+      _lastObservedSignature = _createCurrentStateSignature();
+      _lastUploadedSignature = _lastObservedSignature;
+      await _persistUploadedSignature(_lastObservedSignature!);
+
+      await cloudProvider.markCloudSyncCompleted(
+        completedAt: uploadedInfo?.modifiedTime ?? DateTime.now(),
       );
 
-      if (snapshotSignature == _lastUploadedSignature) {
+      return true;
+    } on GoogleDriveAuthorizationRequiredException catch (error) {
+      debugPrint('Watcher Auto Sync authorization required: $error');
+      return false;
+    } catch (error) {
+      debugPrint('Watcher Auto Sync failed: $error');
+
+      if (!manual && !_disposed && _canUseCloud()) {
+        _scheduleSync(_retryDelay);
+      }
+
+      return false;
+    } finally {
+      _syncing = false;
+
+      if (_syncAgain && !_disposed && _canUseCloud()) {
+        _syncAgain = false;
+        _scheduleSync(const Duration(seconds: 2));
+      }
+    }
+  }
+
+  Future<void> _performBackupOnly() async {
+    if (_disposed || !_canUseCloud() || !cloudProvider.autoBackupEnabled) {
+      return;
+    }
+
+    if (_syncing) {
+      _syncAgain = true;
+      return;
+    }
+
+    _syncing = true;
+
+    try {
+      final signature = _createCurrentStateSignature();
+
+      if (signature == _lastUploadedSignature) {
         return;
       }
 
-      final jsonData = await StorageService.encodeBackup(shows);
+      final jsonData = await StorageService.encodeSyncBackup(
+        showProvider.allShows,
+        showProvider.deletedShowTombstones,
+      );
 
       final info = await GoogleDriveBackupService.instance.uploadBackupJson(
         jsonData,
       );
 
-      if (_disposed) {
-        return;
-      }
-
-      _lastUploadedSignature = snapshotSignature;
-
-      _lastObservedSignature = _createCurrentLibrarySignature();
-
-      _pendingSignature = null;
-
-      await _persistUploadedSignature(snapshotSignature);
-
+      _lastUploadedSignature = signature;
+      _lastObservedSignature = signature;
+      await _persistUploadedSignature(signature);
       await cloudProvider.markCloudBackupCompleted(info: info);
-    } on GoogleDriveAuthorizationRequiredException catch (error) {
-      debugPrint('Watcher Auto Backup authorization required: $error');
     } catch (error) {
       debugPrint('Watcher Auto Backup failed: $error');
+      _scheduleBackupOnly(_retryDelay);
     } finally {
-      _uploading = false;
-
-      if (!_disposed) {
-        if (_uploadAgain) {
-          // --------------------------------------------------
-          // Library changed while previous upload was running.
-          // Try again with the newest snapshot shortly.
-          // --------------------------------------------------
-
-          _uploadAgain = false;
-
-          _uploadTimer?.cancel();
-
-          _uploadTimer = Timer(_retryAfterActiveUpload, () {
-            unawaited(_performAutoBackup());
-          });
-        } else {
-          final newestSignature = _createCurrentLibrarySignature();
-
-          if (_canAutoBackup() &&
-              newestSignature != _lastUploadedSignature &&
-              newestSignature != _pendingSignature) {
-            _scheduleAutoBackup(newestSignature);
-          }
-        }
-      }
+      _syncing = false;
     }
   }
 
-  // ==========================================================
-  // CURRENT LIBRARY SIGNATURE
-  // ==========================================================
-
-  String _createCurrentLibrarySignature() {
-    final jsonList = showProvider.allShows
-        .map((show) => show.toJson())
-        .toList(growable: false);
-
-    return _createLibrarySignature(jsonList);
+  String _createDecodedCloudSignature(String raw) {
+    final state = StorageService.decodeSyncBackup(raw);
+    return _createStateSignature(state.shows, state.deletedShows);
   }
 
-  // ==========================================================
-  // STABLE SIGNATURE
-  // ==========================================================
+  String _createCurrentStateSignature() {
+    return _createStateSignature(
+      showProvider.allShows,
+      showProvider.deletedShowTombstones,
+    );
+  }
 
-  String _createLibrarySignature(Object data) {
-    final raw = jsonEncode(data);
+  String _createStateSignature(
+    List<dynamic> shows,
+    Map<String, DateTime> deletions,
+  ) {
+    final showJson =
+        shows
+            .map((item) {
+              if (item is Map<String, dynamic>) {
+                return item;
+              }
+              return (item as dynamic).toJson() as Map<String, dynamic>;
+            })
+            .toList(growable: false)
+          ..sort(
+            (a, b) => (a['id'] ?? '').toString().compareTo(
+              (b['id'] ?? '').toString(),
+            ),
+          );
 
-    // --------------------------------------------------------
-    // Stable FNV-1a 32-bit hash.
-    //
-    // String.hashCode is not used because this signature
-    // is persisted between app launches.
-    // --------------------------------------------------------
+    final deletionJson = deletions.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
 
+    return _fnv1a32(
+      jsonEncode(<String, dynamic>{
+        'shows': showJson,
+        'deletedShows': <String, String>{
+          for (final entry in deletionJson)
+            entry.key: entry.value.toUtc().toIso8601String(),
+        },
+      }),
+    );
+  }
+
+  String _fnv1a32(String raw) {
     int hash = 0x811C9DC5;
 
     for (final unit in raw.codeUnits) {
       hash ^= unit;
-
       hash = (hash * 0x01000193) & 0xFFFFFFFF;
     }
 
     return hash.toRadixString(16).padLeft(8, '0');
   }
 
-  // ==========================================================
-  // SAVE UPLOADED SIGNATURE
-  // ==========================================================
-
   Future<void> _persistUploadedSignature(String signature) async {
     try {
       final preferences = await SharedPreferences.getInstance();
-
       await preferences.setString(_uploadedSignatureKey, signature);
-    } catch (error) {
-      debugPrint('Could not save cloud backup signature: $error');
-    }
+    } catch (_) {}
   }
-
-  // ==========================================================
-  // DISPOSE
-  // ==========================================================
 
   void dispose() {
     if (_disposed) {
@@ -448,13 +375,13 @@ class CloudAutoBackupController {
     }
 
     _disposed = true;
-
     _changeDetectionTimer?.cancel();
-
-    _uploadTimer?.cancel();
-
+    _syncTimer?.cancel();
     showProvider.removeListener(_onShowProviderChanged);
-
     cloudProvider.removeListener(_onCloudProviderChanged);
+
+    if (identical(active, this)) {
+      active = null;
+    }
   }
 }

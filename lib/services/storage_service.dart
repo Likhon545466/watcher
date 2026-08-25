@@ -5,6 +5,18 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/show.dart';
 
+class WatcherSyncBackup {
+  final List<Show> shows;
+  final Map<String, DateTime> deletedShows;
+  final DateTime? exportedAt;
+
+  const WatcherSyncBackup({
+    required this.shows,
+    required this.deletedShows,
+    this.exportedAt,
+  });
+}
+
 class StorageService {
   static const String showsKey = 'watcher_shows_json_key';
 
@@ -46,6 +58,66 @@ class StorageService {
         .whereType<Map>()
         .map((item) => Show.fromJson(Map<String, dynamic>.from(item)))
         .toList(growable: false);
+  }
+
+  static Future<String> encodeSyncBackup(
+    List<Show> shows,
+    Map<String, DateTime> deletedShows,
+  ) async {
+    final payload = <String, dynamic>{
+      'app': 'Watcher',
+      'version': 3,
+      'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'shows': shows.map((show) => show.toJson()).toList(),
+      'deletedShows': deletedShows.map(
+        (id, deletedAt) => MapEntry(id, deletedAt.toUtc().toIso8601String()),
+      ),
+    };
+
+    return jsonEncode(payload);
+  }
+
+  static WatcherSyncBackup decodeSyncBackup(String raw) {
+    final decoded = jsonDecode(raw);
+
+    if (decoded is List) {
+      return WatcherSyncBackup(
+        shows: decoded
+            .whereType<Map>()
+            .map((item) => Show.fromJson(Map<String, dynamic>.from(item)))
+            .toList(growable: false),
+        deletedShows: const <String, DateTime>{},
+      );
+    }
+
+    if (decoded is! Map || decoded['shows'] is! List) {
+      throw const FormatException('This is not a valid Watcher backup.');
+    }
+
+    final shows = (decoded['shows'] as List<dynamic>)
+        .whereType<Map>()
+        .map((item) => Show.fromJson(Map<String, dynamic>.from(item)))
+        .toList(growable: false);
+
+    final deletedShows = <String, DateTime>{};
+    final rawDeleted = decoded['deletedShows'];
+
+    if (rawDeleted is Map) {
+      rawDeleted.forEach((key, value) {
+        final id = key.toString().trim();
+        final date = DateTime.tryParse(value?.toString() ?? '');
+
+        if (id.isNotEmpty && date != null) {
+          deletedShows[id] = date.toUtc();
+        }
+      });
+    }
+
+    return WatcherSyncBackup(
+      shows: shows,
+      deletedShows: deletedShows,
+      exportedAt: DateTime.tryParse(decoded['exportedAt']?.toString() ?? ''),
+    );
   }
 
   static Future<File> createBackupFile(List<Show> shows) async {

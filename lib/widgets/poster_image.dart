@@ -135,6 +135,12 @@ class _PosterImageState extends State<PosterImage> {
     // ========================================================
 
     if (clean.contains('image.tmdb.org/t/p/')) {
+      // Small list cards do not need an original-resolution source.
+      // Use w500 for compact posters and keep original for large/detail use.
+      if (widget.width <= 220) {
+        return clean.replaceAll(RegExp(r'/(?:w\d+|original)/'), '/w500/');
+      }
+
       return clean.replaceAll(RegExp(r'/w\d+/'), '/original/');
     }
 
@@ -180,14 +186,28 @@ class _PosterImageState extends State<PosterImage> {
   // ==========================================================
 
   Widget _buildCachedImage(BuildContext context, File file) {
+    final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+
+    final cacheWidth = (widget.width * devicePixelRatio)
+        .round()
+        .clamp(1, 1600)
+        .toInt();
+
+    final cacheHeight = (widget.height * devicePixelRatio)
+        .round()
+        .clamp(1, 2400)
+        .toInt();
+
     return Image.file(
       file,
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
+      cacheWidth: cacheWidth,
+      cacheHeight: cacheHeight,
 
-      // Improves appearance when the cached source is
-      // significantly larger than the card dimensions.
+      // Decode near the actual display size to reduce memory
+      // pressure while keeping the cached source unchanged.
       filterQuality: FilterQuality.medium,
 
       errorBuilder: (context, error, stackTrace) {
@@ -213,11 +233,25 @@ class _PosterImageState extends State<PosterImage> {
       return _buildPlaceholder(context);
     }
 
+    final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+
+    final cacheWidth = (widget.width * devicePixelRatio)
+        .round()
+        .clamp(1, 1600)
+        .toInt();
+
+    final cacheHeight = (widget.height * devicePixelRatio)
+        .round()
+        .clamp(1, 2400)
+        .toInt();
+
     return Image.network(
       _resolvedUrl,
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
+      cacheWidth: cacheWidth,
+      cacheHeight: cacheHeight,
       filterQuality: FilterQuality.medium,
       errorBuilder: (context, error, stackTrace) {
         return _buildPlaceholder(context);

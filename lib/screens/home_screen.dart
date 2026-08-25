@@ -127,7 +127,7 @@ class HomeScreenState extends State<HomeScreen> {
     _backgroundSeriesSyncScheduled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Future<void>.delayed(const Duration(milliseconds: 900), () {
+      Future<void>.delayed(const Duration(milliseconds: 4000), () {
         if (!mounted) {
           return;
         }
@@ -251,11 +251,56 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   // ==========================================================
+  // SMART SEARCH QUERY
+  // Supports:
+  //   Batman
+  //   Batman 2022
+  //   Batman (2022)
+  // ==========================================================
+
+  ({String title, String? year}) _parseSearchQuery(String rawQuery) {
+    final trimmed = rawQuery.trim();
+
+    final match = RegExp(
+      r'^(.*?)(?:\s*\(?(18|19|20)\d{2}\)?)\s*$',
+    ).firstMatch(trimmed);
+
+    if (match == null) {
+      return (title: trimmed, year: null);
+    }
+
+    final fullYearMatch = RegExp(
+      r'(18|19|20)\d{2}',
+    ).firstMatch(match.group(0) ?? '');
+
+    final title = (match.group(1) ?? '').trim();
+    final year = fullYearMatch?.group(0);
+
+    // Only treat the year as a filter when a title exists before it.
+    // A query such as "2022" keeps the old normal-search behavior.
+    if (title.isEmpty || year == null) {
+      return (title: trimmed, year: null);
+    }
+
+    return (title: title, year: year);
+  }
+
+  bool _yearMatches(String sourceYear, String year) {
+    return RegExp(
+      r'(?<!\d)' + RegExp.escape(year) + r'(?!\d)',
+    ).hasMatch(sourceYear);
+  }
+
+  // ==========================================================
   // SEARCH
   // ==========================================================
 
   void _onSearchChanged(String value) {
     context.read<ShowProvider>().setSearchQuery(value);
+
+    if (mounted) {
+      setState(() {});
+    }
 
     _debounce?.cancel();
 
@@ -283,7 +328,9 @@ class HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      String cleanQuery = query.trim();
+      final parsedQuery = _parseSearchQuery(query);
+      String cleanQuery = parsedQuery.title;
+      final requestedYear = parsedQuery.year;
 
       final lower = cleanQuery.toLowerCase();
 
@@ -310,7 +357,13 @@ class HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      setState(() => _onlineResults = results);
+      final filteredResults = requestedYear == null
+          ? results
+          : results
+                .where((item) => _yearMatches(item.year, requestedYear))
+                .toList(growable: false);
+
+      setState(() => _onlineResults = filteredResults);
     } on OmdbException catch (error) {
       if (!mounted) {
         return;
@@ -522,189 +575,186 @@ class HomeScreenState extends State<HomeScreen> {
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(28),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-              child: Container(
-                decoration: BoxDecoration(
+            child: Container(
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF0F172A).withOpacity(0.68)
+                    : Colors.white.withOpacity(0.65),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
                   color: isDark
-                      ? const Color(0xFF0F172A).withOpacity(0.68)
-                      : Colors.white.withOpacity(0.65),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
-                    color: isDark
-                        ? Colors.white.withOpacity(0.22)
-                        : Colors.black.withOpacity(0.12),
-                    width: 1.2,
+                      ? Colors.white.withOpacity(0.22)
+                      : Colors.black.withOpacity(0.12),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.35 : 0.12),
+                    blurRadius: 30,
+                    spreadRadius: 2,
+                    offset: const Offset(0, 10),
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(isDark ? 0.35 : 0.12),
-                      blurRadius: 30,
-                      spreadRadius: 2,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                child: StatefulBuilder(
-                  builder: (context, setSheetState) {
-                    final primary = theme.colorScheme.primary;
+                ],
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: StatefulBuilder(
+                builder: (context, setSheetState) {
+                  final primary = theme.colorScheme.primary;
 
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Center(
-                          child: Container(
-                            width: 38,
-                            height: 4,
-                            margin: const EdgeInsets.only(bottom: 16),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.white.withOpacity(0.3)
-                                  : Colors.black.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Center(
+                        child: Container(
+                          width: 38,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withOpacity(0.3)
+                                : Colors.black.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                         ),
+                      ),
 
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: <Widget>[
-                            Text(
-                              'Sort & Filter',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: primary,
-                              ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: <Widget>[
+                          Text(
+                            'Sort & Filter',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: primary,
                             ),
-                            IconButton(
-                              icon: const Icon(Icons.close_rounded),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              onPressed: () => Navigator.pop(context),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      Text(
+                        'Sort By',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: SortOption.values.map((opt) {
+                          final name = opt == SortOption.dateAdded
+                              ? 'Recent Activity'
+                              : opt == SortOption.rating
+                              ? 'Rating'
+                              : opt == SortOption.title
+                              ? 'Title (A-Z)'
+                              : 'Release Year';
+
+                          final isSelected = _currentSort == opt;
+
+                          return ChoiceChip(
+                            label: Text(name),
+                            selected: isSelected,
+                            selectedColor: primary.withOpacity(0.3),
+                            backgroundColor: isDark
+                                ? Colors.white.withOpacity(0.1)
+                                : Colors.black.withOpacity(0.06),
+                            side: BorderSide(
+                              color: isSelected
+                                  ? primary
+                                  : isDark
+                                  ? Colors.white.withOpacity(0.18)
+                                  : Colors.black.withOpacity(0.1),
                             ),
-                          ],
+                            labelStyle: TextStyle(
+                              color: isSelected
+                                  ? primary
+                                  : theme.colorScheme.onSurface,
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                            onSelected: (_) {
+                              setState(() => _currentSort = opt);
+
+                              setSheetState(() {});
+                            },
+                          );
+                        }).toList(),
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      Text(
+                        'Format Filter',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onSurface,
                         ),
+                      ),
 
-                        const SizedBox(height: 14),
+                      const SizedBox(height: 8),
 
-                        Text(
-                          'Sort By',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: TypeFilter.values.map((tf) {
+                          final name = tf == TypeFilter.all
+                              ? 'All Formats'
+                              : tf == TypeFilter.movies
+                              ? 'Movies Only'
+                              : 'Series Only';
 
-                        const SizedBox(height: 8),
+                          final isSelected = _typeFilter == tf;
 
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: SortOption.values.map((opt) {
-                            final name = opt == SortOption.dateAdded
-                                ? 'Recent Activity'
-                                : opt == SortOption.rating
-                                ? 'Rating'
-                                : opt == SortOption.title
-                                ? 'Title (A-Z)'
-                                : 'Release Year';
+                          return ChoiceChip(
+                            label: Text(name),
+                            selected: isSelected,
+                            selectedColor: primary.withOpacity(0.3),
+                            backgroundColor: isDark
+                                ? Colors.white.withOpacity(0.1)
+                                : Colors.black.withOpacity(0.06),
+                            side: BorderSide(
+                              color: isSelected
+                                  ? primary
+                                  : isDark
+                                  ? Colors.white.withOpacity(0.18)
+                                  : Colors.black.withOpacity(0.1),
+                            ),
+                            labelStyle: TextStyle(
+                              color: isSelected
+                                  ? primary
+                                  : theme.colorScheme.onSurface,
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                            onSelected: (_) {
+                              setState(() => _typeFilter = tf);
 
-                            final isSelected = _currentSort == opt;
-
-                            return ChoiceChip(
-                              label: Text(name),
-                              selected: isSelected,
-                              selectedColor: primary.withOpacity(0.3),
-                              backgroundColor: isDark
-                                  ? Colors.white.withOpacity(0.1)
-                                  : Colors.black.withOpacity(0.06),
-                              side: BorderSide(
-                                color: isSelected
-                                    ? primary
-                                    : isDark
-                                    ? Colors.white.withOpacity(0.18)
-                                    : Colors.black.withOpacity(0.1),
-                              ),
-                              labelStyle: TextStyle(
-                                color: isSelected
-                                    ? primary
-                                    : theme.colorScheme.onSurface,
-                                fontWeight: isSelected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
-                              onSelected: (_) {
-                                setState(() => _currentSort = opt);
-
-                                setSheetState(() {});
-                              },
-                            );
-                          }).toList(),
-                        ),
-
-                        const SizedBox(height: 18),
-
-                        Text(
-                          'Format Filter',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: TypeFilter.values.map((tf) {
-                            final name = tf == TypeFilter.all
-                                ? 'All Formats'
-                                : tf == TypeFilter.movies
-                                ? 'Movies Only'
-                                : 'Series Only';
-
-                            final isSelected = _typeFilter == tf;
-
-                            return ChoiceChip(
-                              label: Text(name),
-                              selected: isSelected,
-                              selectedColor: primary.withOpacity(0.3),
-                              backgroundColor: isDark
-                                  ? Colors.white.withOpacity(0.1)
-                                  : Colors.black.withOpacity(0.06),
-                              side: BorderSide(
-                                color: isSelected
-                                    ? primary
-                                    : isDark
-                                    ? Colors.white.withOpacity(0.18)
-                                    : Colors.black.withOpacity(0.1),
-                              ),
-                              labelStyle: TextStyle(
-                                color: isSelected
-                                    ? primary
-                                    : theme.colorScheme.onSurface,
-                                fontWeight: isSelected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
-                              onSelected: (_) {
-                                setState(() => _typeFilter = tf);
-
-                                setSheetState(() {});
-                              },
-                            );
-                          }).toList(),
-                        ),
-                      ],
-                    );
-                  },
-                ),
+                              setSheetState(() {});
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -759,10 +809,23 @@ class HomeScreenState extends State<HomeScreen> {
       result = result.where((show) => show.status == category);
     }
 
-    final query = _searchController.text.trim().toLowerCase();
+    final rawQuery = _searchController.text.trim();
 
-    if (query.isNotEmpty) {
+    if (rawQuery.isNotEmpty) {
+      final parsedQuery = _parseSearchQuery(rawQuery);
+      final titleQuery = parsedQuery.title.toLowerCase();
+      final requestedYear = parsedQuery.year;
+
       result = result.where((show) {
+        if (requestedYear != null) {
+          final titleMatches = show.title.toLowerCase().contains(titleQuery);
+          final yearMatches = _yearMatches(show.yearText, requestedYear);
+
+          return titleMatches && yearMatches;
+        }
+
+        final query = rawQuery.toLowerCase();
+
         return show.title.toLowerCase().contains(query) ||
             show.yearText.toLowerCase().contains(query) ||
             show.genre.toLowerCase().contains(query) ||
@@ -830,7 +893,13 @@ class HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<ShowProvider>();
+    context.select<ShowProvider, String>(
+      (provider) =>
+          '${provider.loading}|'
+          '${provider.allShows.map((show) => show.hashCode).join(',')}',
+    );
+
+    final provider = context.read<ShowProvider>();
 
     final theme = Theme.of(context);
 
@@ -950,7 +1019,7 @@ class HomeScreenState extends State<HomeScreen> {
                                   physics: const PageScrollPhysics(
                                     parent: BouncingScrollPhysics(),
                                   ),
-                                  allowImplicitScrolling: true,
+                                  allowImplicitScrolling: false,
                                   onPageChanged: _onPageChanged,
                                   itemCount: _categories.length,
                                   itemBuilder: (context, catIndex) {
@@ -971,6 +1040,7 @@ class HomeScreenState extends State<HomeScreen> {
 
                                     return ListView.builder(
                                       physics: const BouncingScrollPhysics(),
+                                      cacheExtent: 350,
                                       padding: const EdgeInsets.fromLTRB(
                                         16,
                                         6,
@@ -981,25 +1051,32 @@ class HomeScreenState extends State<HomeScreen> {
                                       itemBuilder: (context, index) {
                                         final show = categoryShows[index];
 
-                                        return _ShowRow(
-                                          show: show,
-                                          onOpen: () => Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) => ShowDetailScreen(
-                                                showId: show.id,
+                                        return RepaintBoundary(
+                                          child: _ShowRow(
+                                            show: show,
+                                            onOpen: () => Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    ShowDetailScreen(
+                                                      showId: show.id,
+                                                    ),
                                               ),
                                             ),
+                                            onDelete: () => _deleteShow(show),
+                                            onIncrement: () {
+                                              HapticFeedback.lightImpact();
+                                              provider.incrementEpisode(
+                                                show.id,
+                                              );
+                                            },
+                                            onDecrement: () {
+                                              HapticFeedback.lightImpact();
+                                              provider.decrementEpisode(
+                                                show.id,
+                                              );
+                                            },
                                           ),
-                                          onDelete: () => _deleteShow(show),
-                                          onIncrement: () {
-                                            HapticFeedback.lightImpact();
-                                            provider.incrementEpisode(show.id);
-                                          },
-                                          onDecrement: () {
-                                            HapticFeedback.lightImpact();
-                                            provider.decrementEpisode(show.id);
-                                          },
                                         );
                                       },
                                     );
@@ -1185,159 +1262,156 @@ class _OnlineSearchPanel extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          decoration: BoxDecoration(
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark
+              ? const Color(0xFF0F172A).withOpacity(0.85)
+              : Colors.white.withOpacity(0.82),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
             color: isDark
-                ? const Color(0xFF0F172A).withOpacity(0.85)
-                : Colors.white.withOpacity(0.82),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withOpacity(0.18)
-                  : Colors.black.withOpacity(0.12),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.35 : 0.12),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
+                ? Colors.white.withOpacity(0.18)
+                : Colors.black.withOpacity(0.12),
+            width: 1.2,
           ),
-          child: Container(
-            constraints: const BoxConstraints(maxHeight: 280),
-            child: loading && results.isEmpty
-                ? SizedBox(
-                    height: 70,
-                    child: Center(
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isDark ? 0.35 : 0.12),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Container(
+          constraints: const BoxConstraints(maxHeight: 280),
+          child: loading && results.isEmpty
+              ? SizedBox(
+                  height: 70,
+                  child: Center(
+                    child: Text(
+                      'Searching OMDb...',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                )
+              : error != null
+              ? SizedBox(
+                  height: 70,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
                       child: Text(
-                        'Searching OMDb...',
+                        error!,
+                        textAlign: TextAlign.center,
                         style: TextStyle(
+                          fontSize: 13,
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  itemCount: results.length,
+                  separatorBuilder: (_, __) => Divider(
+                    height: 1,
+                    color: isDark
+                        ? Colors.white.withOpacity(0.08)
+                        : Colors.black.withOpacity(0.08),
+                  ),
+                  itemBuilder: (context, index) {
+                    final item = results[index];
+
+                    final existing = provider.findLibraryMatchForImdb(
+                      imdbId: item.imdbId,
+                      title: item.title,
+                      type: item.type,
+                      yearText: item.year,
+                    );
+
+                    final statusColor = existing != null
+                        ? StatusStyle.color(existing.status)
+                        : theme.colorScheme.primary;
+
+                    return ListTile(
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 2,
+                      ),
+                      leading: PosterImage(
+                        url: item.posterUrl,
+                        width: 34,
+                        height: 50,
+                        radius: 6,
+                      ),
+                      title: Text(
+                        item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
                           fontSize: 14,
                           color: theme.colorScheme.onSurface,
                         ),
                       ),
-                    ),
-                  )
-                : error != null
-                ? SizedBox(
-                    height: 70,
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text(
-                          error!,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: theme.colorScheme.error,
-                          ),
+                      subtitle: Text(
+                        '${item.type} • ${item.year}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                  )
-                : ListView.separated(
-                    shrinkWrap: true,
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    itemCount: results.length,
-                    separatorBuilder: (_, __) => Divider(
-                      height: 1,
-                      color: isDark
-                          ? Colors.white.withOpacity(0.08)
-                          : Colors.black.withOpacity(0.08),
-                    ),
-                    itemBuilder: (context, index) {
-                      final item = results[index];
-
-                      final existing = provider.findLibraryMatchForImdb(
-                        imdbId: item.imdbId,
-                        title: item.title,
-                        type: item.type,
-                        yearText: item.year,
-                      );
-
-                      final statusColor = existing != null
-                          ? StatusStyle.color(existing.status)
-                          : theme.colorScheme.primary;
-
-                      return ListTile(
-                        dense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 2,
-                        ),
-                        leading: PosterImage(
-                          url: item.posterUrl,
-                          width: 34,
-                          height: 50,
-                          radius: 6,
-                        ),
-                        title: Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                        subtitle: Text(
-                          '${item.type} • ${item.year}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        trailing: existing == null
-                            ? Icon(
-                                Icons.add_circle_rounded,
-                                color: theme.colorScheme.primary,
-                                size: 24,
-                              )
-                            : Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 5,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: statusColor.withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: statusColor.withOpacity(0.35),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: <Widget>[
-                                    Icon(
-                                      Icons.check_circle_rounded,
-                                      color: statusColor,
-                                      size: 14,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      existing.status,
-                                      style: TextStyle(
-                                        color: statusColor,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
+                      trailing: existing == null
+                          ? Icon(
+                              Icons.add_circle_rounded,
+                              color: theme.colorScheme.primary,
+                              size: 24,
+                            )
+                          : Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: statusColor.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: statusColor.withOpacity(0.35),
                                 ),
                               ),
-                        onTap: () => onSelect(item),
-                      );
-                    },
-                  ),
-          ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Icon(
+                                    Icons.check_circle_rounded,
+                                    color: statusColor,
+                                    size: 14,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    existing.status,
+                                    style: TextStyle(
+                                      color: statusColor,
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                      onTap: () => onSelect(item),
+                    );
+                  },
+                ),
         ),
       ),
     );
@@ -1369,51 +1443,48 @@ class _CategoryPill extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(22),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(22),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(22),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected
+                  ? color.withOpacity(isDark ? 0.28 : 0.20)
+                  : isDark
+                  ? Colors.white.withOpacity(0.08)
+                  : Colors.black.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
                 color: selected
-                    ? color.withOpacity(isDark ? 0.28 : 0.20)
+                    ? color.withOpacity(0.85)
                     : isDark
-                    ? Colors.white.withOpacity(0.08)
-                    : Colors.black.withOpacity(0.04),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(
-                  color: selected
-                      ? color.withOpacity(0.85)
-                      : isDark
-                      ? Colors.white.withOpacity(0.18)
-                      : Colors.black.withOpacity(0.12),
-                  width: selected ? 1.5 : 1,
-                ),
-                boxShadow: selected
-                    ? [
-                        BoxShadow(
-                          color: color.withOpacity(0.30),
-                          blurRadius: 12,
-                          spreadRadius: 1,
-                        ),
-                      ]
-                    : null,
+                    ? Colors.white.withOpacity(0.18)
+                    : Colors.black.withOpacity(0.12),
+                width: selected ? 1.5 : 1,
               ),
-              child: Text(
-                category,
-                style: TextStyle(
-                  color: selected
-                      ? color
-                      : Theme.of(context).colorScheme.onSurface,
-                  fontSize: 13.5,
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                ),
+              boxShadow: selected
+                  ? [
+                      BoxShadow(
+                        color: color.withOpacity(0.30),
+                        blurRadius: 12,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Text(
+              category,
+              style: TextStyle(
+                color: selected
+                    ? color
+                    : Theme.of(context).colorScheme.onSurface,
+                fontSize: 13.5,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
               ),
             ),
           ),
@@ -1506,22 +1577,14 @@ class _ShowRowState extends State<_ShowRow> {
 
     if (year != null && year.isNotEmpty) {
       items.add(
-        _MovieMetaItem(
-          icon: Icons.calendar_month_rounded,
-          label: year,
-        ),
+        _MovieMetaItem(icon: Icons.calendar_month_rounded, label: year),
       );
     }
 
     final runtime = _formatMovieRuntime(show.runtimeMinutes);
 
     if (runtime.isNotEmpty) {
-      items.add(
-        _MovieMetaItem(
-          icon: Icons.schedule_rounded,
-          label: runtime,
-        ),
-      );
+      items.add(_MovieMetaItem(icon: Icons.schedule_rounded, label: runtime));
     }
 
     if (show.rating > 0) {
@@ -1538,10 +1601,7 @@ class _ShowRowState extends State<_ShowRow> {
 
       if (genre != null && genre.isNotEmpty) {
         items.add(
-          _MovieMetaItem(
-            icon: Icons.local_movies_rounded,
-            label: genre,
-          ),
+          _MovieMetaItem(icon: Icons.local_movies_rounded, label: genre),
         );
       }
     }
@@ -1576,33 +1636,21 @@ class _ShowRowState extends State<_ShowRow> {
 
     final knownCount = show.currentSeasonEpisodeCount;
 
-    final countIsFinal = show.currentSeasonEpisodeCountIsFinal;
+    // Use real season metadata whenever Watcher already knows it.
+    // Never fall back to an artificial 10-episode denominator.
+    int displayLimit = knownCount;
 
-    final displayLimit = countIsFinal ? knownCount : 0;
-
-    int progressBase;
-
-    if (displayLimit > 0) {
-      progressBase = displayLimit;
-    } else {
-      progressBase = 10;
-
-      if (knownCount > progressBase) {
-        progressBase = knownCount;
-      }
-
-      if (show.currentSeasonLastAiredEpisode > progressBase) {
-        progressBase = show.currentSeasonLastAiredEpisode;
-      }
-
-      if (show.currentEpisode > progressBase) {
-        progressBase = show.currentEpisode;
-      }
+    if (show.currentSeasonLastAiredEpisode > displayLimit) {
+      displayLimit = show.currentSeasonLastAiredEpisode;
     }
 
-    final progress = progressBase > 0
-        ? (show.currentEpisode / progressBase).clamp(0.0, 1.0).toDouble()
-        : 0.0;
+    if (show.currentEpisode > displayLimit) {
+      displayLimit = show.currentEpisode;
+    }
+
+    final double? progress = displayLimit > 0
+        ? (show.currentEpisode / displayLimit).clamp(0.0, 1.0).toDouble()
+        : null;
 
     final epText = displayLimit > 0
         ? 'S${show.currentSeason} • EP${show.currentEpisode} / $displayLimit'
@@ -1622,7 +1670,8 @@ class _ShowRowState extends State<_ShowRow> {
             borderRadius: 16,
             padding: const EdgeInsets.all(10),
             onTap: widget.onOpen,
-            child: IntrinsicHeight(
+            child: SizedBox(
+              height: 115,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
@@ -1826,7 +1875,7 @@ class _ShowRowState extends State<_ShowRow> {
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
                                   child: LinearProgressIndicator(
-                                    value: progress,
+                                    value: progress ?? 0.0,
                                     minHeight: 3.5,
                                     color: Theme.of(
                                       context,
@@ -1853,9 +1902,7 @@ class _ShowRowState extends State<_ShowRow> {
                             ],
                           )
                         else
-                          _MovieMetaCapsules(
-                            items: _movieMetaItems(show),
-                          ),
+                          _MovieMetaCapsules(items: _movieMetaItems(show)),
                       ],
                     ),
                   ),
@@ -1902,7 +1949,7 @@ class _ShowRowState extends State<_ShowRow> {
 }
 
 // ============================================================
-// MOVIE META SINGLE GLASS CAPSULE
+// MOVIE META SINGE
 // ============================================================
 
 class _MovieMetaItem {
@@ -1927,62 +1974,59 @@ class _MovieMetaCapsules extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(999),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: double.infinity),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            decoration: BoxDecoration(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: double.infinity),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.white.withOpacity(0.075)
+                : colors.surface.withOpacity(0.52),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
               color: isDark
-                  ? Colors.white.withOpacity(0.075)
-                  : colors.surface.withOpacity(0.52),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withOpacity(0.13)
-                    : Colors.black.withOpacity(0.075),
-              ),
+                  ? Colors.white.withOpacity(0.13)
+                  : Colors.black.withOpacity(0.075),
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  for (int index = 0; index < items.length; index++) ...<Widget>[
-                    Icon(
-                      items[index].icon,
-                      size: 11.5,
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                for (int index = 0; index < items.length; index++) ...<Widget>[
+                  Icon(
+                    items[index].icon,
+                    size: 11.5,
+                    color: colors.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    items[index].label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.8,
+                      height: 1,
+                      fontWeight: FontWeight.w700,
                       color: colors.onSurfaceVariant,
+                      letterSpacing: -0.08,
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      items[index].label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10.8,
-                        height: 1,
-                        fontWeight: FontWeight.w700,
-                        color: colors.onSurfaceVariant,
-                        letterSpacing: -0.08,
+                  ),
+                  if (index != items.length - 1) ...<Widget>[
+                    const SizedBox(width: 7),
+                    Container(
+                      width: 3,
+                      height: 3,
+                      decoration: BoxDecoration(
+                        color: colors.onSurfaceVariant.withOpacity(0.38),
+                        shape: BoxShape.circle,
                       ),
                     ),
-                    if (index != items.length - 1) ...<Widget>[
-                      const SizedBox(width: 7),
-                      Container(
-                        width: 3,
-                        height: 3,
-                        decoration: BoxDecoration(
-                          color: colors.onSurfaceVariant.withOpacity(0.38),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 7),
-                    ],
+                    const SizedBox(width: 7),
                   ],
                 ],
-              ),
+              ],
             ),
           ),
         ),
@@ -2047,7 +2091,9 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final accent = category == 'All' ? colors.primary : StatusStyle.color(category);
+    final accent = category == 'All'
+        ? colors.primary
+        : StatusStyle.color(category);
 
     return Center(
       child: Padding(
@@ -2057,29 +2103,22 @@ class _EmptyState extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(28),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                child: Container(
-                  width: 78,
-                  height: 78,
-                  decoration: BoxDecoration(
-                    color: accent.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(28),
-                    border: Border.all(color: accent.withOpacity(0.26)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.withOpacity(0.10),
-                        blurRadius: 24,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    _iconForCategory(),
-                    size: 38,
-                    color: accent,
-                  ),
+              child: Container(
+                width: 78,
+                height: 78,
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: accent.withOpacity(0.26)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accent.withOpacity(0.10),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
                 ),
+                child: Icon(_iconForCategory(), size: 38, color: accent),
               ),
             ),
             const SizedBox(height: 16),

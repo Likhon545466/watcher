@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:display_mode/display_mode.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,6 +26,8 @@ import 'widgets/ambient_background.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
+  unawaited(_enableHighRefreshRate());
+
   runApp(
     MultiProvider(
       providers: [
@@ -49,6 +52,20 @@ void main() {
   );
 
   unawaited(NotificationService.initialize());
+}
+
+// ============================================================
+// HIGH REFRESH RATE
+// ============================================================
+
+Future<void> _enableHighRefreshRate() async {
+  try {
+    await FlutterDisplayMode.setHighRefreshRate();
+  } on PlatformException {
+    // Device/API supported না হলে app normal refresh rate এ চলবে।
+  } catch (_) {
+    // Safety fallback. Refresh rate issue হলেও app startup block হবে না।
+  }
 }
 
 // ============================================================
@@ -101,7 +118,8 @@ class MainNavigation extends StatefulWidget {
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation>
+    with WidgetsBindingObserver {
   final GlobalKey<HomeScreenState> _homeScreenKey =
       GlobalKey<HomeScreenState>();
 
@@ -124,6 +142,8 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
 
     _mainPageController = PageController(initialPage: _index);
 
@@ -169,7 +189,7 @@ class _MainNavigationState extends State<MainNavigation> {
 
   void _scheduleDiscoverPrefetch() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Future<void>.delayed(const Duration(milliseconds: 1800), () {
+      Future<void>.delayed(const Duration(milliseconds: 5000), () {
         if (!mounted) {
           return;
         }
@@ -250,11 +270,24 @@ class _MainNavigationState extends State<MainNavigation> {
   }
 
   // ==========================================================
+  // APP LIFECYCLE -> MULTI-DEVICE AUTO SYNC
+  // ==========================================================
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _cloudAutoBackupController.onAppResumed();
+    }
+  }
+
+  // ==========================================================
   // DISPOSE
   // ==========================================================
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+
     _cloudAutoBackupController.dispose();
 
     _mainPageController.dispose();

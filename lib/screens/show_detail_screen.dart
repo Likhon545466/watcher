@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +19,8 @@ import '../widgets/glass_container.dart';
 import '../widgets/poster_image.dart';
 import '../widgets/round_step_button.dart';
 import 'add_edit_show_screen.dart';
+import 'discover_detail_screen.dart';
+import 'person_detail_screen.dart';
 
 class ShowDetailScreen extends StatefulWidget {
   final String showId;
@@ -43,6 +47,12 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
   TmdbMediaData? _tmdbData;
   bool _loadingTmdb = false;
   bool _hasFetchedTmdb = false;
+
+  List<TmdbDiscoverItem> _recommendations = const <TmdbDiscoverItem>[];
+  bool _loadingRecommendations = false;
+  bool _hasFetchedRecommendations = false;
+
+  final Set<String> _addingRecommendationIds = <String>{};
 
   // ==========================================================
   // PERSONAL NOTE
@@ -97,6 +107,324 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
         });
       }
     }
+  }
+
+  // ==========================================================
+  // FETCH SIMILAR / RECOMMENDED
+  // ==========================================================
+
+  Future<void> _fetchRecommendationsIfNeeded(Show show) async {
+    if (_hasFetchedRecommendations || _loadingRecommendations) {
+      return;
+    }
+
+    setState(() {
+      _loadingRecommendations = true;
+    });
+
+    try {
+      final items = await TmdbService.fetchSimilarAndRecommended(
+        showId: show.id,
+        title: show.title,
+        type: show.type,
+        limit: 12,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _recommendations = items;
+        _hasFetchedRecommendations = true;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _recommendations = const <TmdbDiscoverItem>[];
+          _hasFetchedRecommendations = true;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingRecommendations = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openRecommendation(TmdbDiscoverItem item) async {
+    final provider = context.read<ShowProvider>();
+
+    final existing = provider.findLibraryMatchForTmdb(
+      tmdbId: item.id,
+      mediaType: item.mediaType,
+      title: item.title,
+      yearText: item.year,
+    );
+
+    if (existing != null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ShowDetailScreen(showId: existing.id),
+        ),
+      );
+
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => DiscoverDetailScreen(item: item)),
+    );
+  }
+
+  Future<void> _showRecommendationAddMenu(TmdbDiscoverItem item) async {
+    final selectedStatus = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+
+        const statuses = <String>[
+          'Plan to Watch',
+          'Watching',
+          'Completed',
+          'On Hold',
+        ];
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+          child: GlassContainer(
+            borderRadius: 22,
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            opacity: 0.96,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.onSurfaceVariant.withOpacity(
+                        0.28,
+                      ),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+                Text(
+                  'Add to Watcher',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                for (final status in statuses) ...<Widget>[
+                  ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    leading: Icon(
+                      StatusStyle.icon(status),
+                      color: StatusStyle.color(status),
+                    ),
+                    title: Text(
+                      status,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, status),
+                  ),
+                  if (status != statuses.last)
+                    Divider(
+                      height: 1,
+                      color: theme.colorScheme.outline.withOpacity(0.08),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedStatus == null || !mounted) {
+      return;
+    }
+
+    await _quickAddRecommendation(item, selectedStatus);
+  }
+
+  Future<void> _quickAddRecommendation(
+    TmdbDiscoverItem item,
+    String status,
+  ) async {
+    if (_addingRecommendationIds.contains(item.uniqueKey)) {
+      return;
+    }
+
+    final provider = context.read<ShowProvider>();
+
+    final existingBefore = provider.findLibraryMatchForTmdb(
+      tmdbId: item.id,
+      mediaType: item.mediaType,
+      title: item.title,
+      yearText: item.year,
+    );
+
+    if (existingBefore != null) {
+      await provider.setStatus(existingBefore.id, status);
+      return;
+    }
+
+    setState(() {
+      _addingRecommendationIds.add(item.uniqueKey);
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final imdbId = await TmdbService.getImdbId(item.id, item.mediaType);
+
+      Show show;
+
+      if (imdbId != null && imdbId.isNotEmpty) {
+        try {
+          show = await OmdbService.getDetails(imdbId, status: status);
+
+          if (show.isSeries) {
+            try {
+              final season = await OmdbService.getSeason(show.id, 1);
+
+              if (season.episodeCount > 0) {
+                show = show.copyWith(
+                  seasonEpisodeCounts: <int, int>{1: season.episodeCount},
+                  seasonEpisodeCountFinalized: const <int, bool>{1: false},
+                  updatedAt: show.updatedAt,
+                );
+              }
+            } catch (_) {
+              // TMDB background metadata sync can fill this later.
+            }
+          }
+        } catch (_) {
+          show = _createRecommendationFallbackShow(item, imdbId, status);
+        }
+      } else {
+        show = _createRecommendationFallbackShow(
+          item,
+          'tmdb_${item.mediaType}_${item.id}',
+          status,
+        );
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      final latestProvider = context.read<ShowProvider>();
+
+      final existingAfter = latestProvider.findLibraryMatch(
+        exactId: show.id,
+        tmdbId: item.id,
+        tmdbMediaType: item.mediaType,
+        title: show.title,
+        type: show.type,
+        yearText: show.yearText,
+      );
+
+      if (existingAfter != null) {
+        await latestProvider.setStatus(existingAfter.id, status);
+
+        if (mounted) {
+          setState(() {});
+        }
+
+        return;
+      }
+
+      final added = await latestProvider.addShow(show);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (added) {
+        if (show.isSeries) {
+          unawaited(
+            latestProvider.syncSeriesMetadataForShow(show.id, force: true),
+          );
+        }
+
+        messenger.showSnackBar(
+          SnackBar(content: Text('${item.title} added as $status.')),
+        );
+
+        setState(() {});
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('This title is already in your watchlist.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _addingRecommendationIds.remove(item.uniqueKey);
+        });
+      }
+    }
+  }
+
+  Show _createRecommendationFallbackShow(
+    TmdbDiscoverItem item,
+    String id,
+    String status,
+  ) {
+    final now = DateTime.now();
+
+    return Show(
+      id: id,
+      title: item.title,
+      type: item.mediaType == 'tv' ? 'Series' : 'Movie',
+      yearText: item.year,
+      genre: 'N/A',
+      director: 'N/A',
+      writer: 'N/A',
+      actors: 'N/A',
+      language: 'N/A',
+      awards: 'N/A',
+      runtimeMinutes: 0,
+      currentSeason: 1,
+      currentEpisode: 0,
+      totalSeasons: 1,
+      seasonProgress: const <int, int>{},
+      seasonEpisodeCounts: const <int, int>{},
+      seasonEpisodeCountFinalized: const <int, bool>{},
+      posterUrl: item.posterUrl ?? '',
+      plot: item.overview,
+      rating: item.voteAverage > 0
+          ? double.parse(item.voteAverage.toStringAsFixed(1))
+          : 0.0,
+      status: status,
+      createdAt: now,
+      updatedAt: now,
+    );
   }
 
   // ==========================================================
@@ -880,6 +1208,126 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
   }
 
   // ==========================================================
+  // BACKDROP GALLERY + SHARE / SAVE
+  // ==========================================================
+
+  String _upgradeBackdropUrl(String url) {
+    final clean = url.trim();
+
+    if (clean.isEmpty) {
+      return clean;
+    }
+
+    if (clean.contains('image.tmdb.org/t/p/')) {
+      return clean.replaceAll(
+        RegExp(r'https://image\.tmdb\.org/t/p/[^/]+'),
+        'https://image.tmdb.org/t/p/original',
+      );
+    }
+
+    return clean;
+  }
+
+  String _backdropIdentity(String url) {
+    return url.trim().toLowerCase().replaceAll(
+      RegExp(r'https://image\.tmdb\.org/t/p/[^/]+'),
+      '',
+    );
+  }
+
+  void _addUniqueBackdrop(List<String> backdrops, String? url) {
+    final clean = url?.trim();
+
+    if (clean == null || clean.isEmpty) {
+      return;
+    }
+
+    final upgraded = _upgradeBackdropUrl(clean);
+    final identity = _backdropIdentity(upgraded);
+
+    final exists = backdrops.any((item) => _backdropIdentity(item) == identity);
+
+    if (!exists) {
+      backdrops.add(upgraded);
+    }
+  }
+
+  List<String> _buildBackdropGalleryUrls() {
+    final backdrops = <String>[];
+
+    _addUniqueBackdrop(backdrops, _tmdbData?.backdropUrl);
+
+    final dynamic tmdbData = _tmdbData;
+    final dynamic rawBackdropUrls = tmdbData?.backdropUrls;
+
+    if (rawBackdropUrls is Iterable) {
+      for (final url in rawBackdropUrls) {
+        _addUniqueBackdrop(backdrops, url?.toString());
+
+        if (backdrops.length >= 10) {
+          break;
+        }
+      }
+    }
+
+    return backdrops;
+  }
+
+  void _openHdBackdrop(Show show) {
+    final backdrops = _buildBackdropGalleryUrls();
+
+    if (backdrops.isEmpty) {
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            _HdBackdropScreen(title: show.title, backdropUrls: backdrops),
+      ),
+    );
+  }
+
+  // ==========================================================
+  // PERSON DETAILS
+  // ==========================================================
+
+  Future<void> _openPerson(String name, {String? departmentHint}) async {
+    final cleanName = name.trim();
+
+    if (cleanName.isEmpty || cleanName == 'N/A') {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    final person = await TmdbService.searchPerson(
+      cleanName,
+      departmentHint: departmentHint,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (person == null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not find details for $cleanName.')),
+      );
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            PersonDetailScreen(personId: person.id, personName: person.name),
+      ),
+    );
+  }
+
+  // ==========================================================
   // BUILD
   // ==========================================================
 
@@ -903,6 +1351,12 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
     if (!_hasFetchedTmdb && !_loadingTmdb) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _fetchTmdbMediaIfNeeded(show),
+      );
+    }
+
+    if (!_hasFetchedRecommendations && !_loadingRecommendations) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _fetchRecommendationsIfNeeded(show),
       );
     }
 
@@ -964,14 +1418,38 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
           children: <Widget>[
             // BACKDROP
             if (_tmdbData?.backdropUrl != null) ...<Widget>[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: CachedNetworkImage(
-                  imageUrl: _tmdbData!.backdropUrl!,
-                  height: 180,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorWidget: (context, url, error) => const SizedBox.shrink(),
+              GestureDetector(
+                onTap: () => _openHdBackdrop(show),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Stack(
+                    children: <Widget>[
+                      CachedNetworkImage(
+                        imageUrl: _tmdbData!.backdropUrl!,
+                        height: 180,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorWidget: (context, url, error) =>
+                            const SizedBox.shrink(),
+                      ),
+                      Positioned(
+                        bottom: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.62),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.open_in_full_rounded,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -1237,7 +1715,80 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            _AboutUnifiedPanel(show: show),
+            _AboutUnifiedPanel(
+              show: show,
+              onPersonTap: (name, departmentHint) =>
+                  _openPerson(name, departmentHint: departmentHint),
+            ),
+
+            if (_loadingRecommendations ||
+                _recommendations.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 24),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      'You May Also Like',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                  if (_loadingRecommendations)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (_recommendations.isNotEmpty)
+                SizedBox(
+                  height: 255,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    cacheExtent: 420,
+                    itemCount: _recommendations.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (context, index) {
+                      final item = _recommendations[index];
+
+                      final provider = context.watch<ShowProvider>();
+
+                      final existing = provider.findLibraryMatchForTmdb(
+                        tmdbId: item.id,
+                        mediaType: item.mediaType,
+                        title: item.title,
+                        yearText: item.year,
+                      );
+
+                      final isAdding = _addingRecommendationIds.contains(
+                        item.uniqueKey,
+                      );
+
+                      return _RecommendationCard(
+                        item: item,
+                        existingStatus: existing?.status,
+                        adding: isAdding,
+                        onTap: () => _openRecommendation(item),
+                        onAdd: existing == null
+                            ? () => _showRecommendationAddMenu(item)
+                            : null,
+                      );
+                    },
+                  ),
+                )
+              else if (_loadingRecommendations)
+                const SizedBox(
+                  height: 120,
+                  child: Center(
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+            ],
           ],
         ),
       ),
@@ -1747,6 +2298,27 @@ class _EpisodeReminderContent extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
+                  if (!endedBlocked && nextAirDate != null) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Row(
+                      children: <Widget>[
+                        Icon(
+                          Icons.calendar_month_rounded,
+                          size: 12.5,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Airs ${formatDate(nextAirDate)}',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1908,8 +2480,9 @@ class _ProgressRow extends StatelessWidget {
 
 class _AboutUnifiedPanel extends StatelessWidget {
   final Show show;
+  final void Function(String name, String? departmentHint) onPersonTap;
 
-  const _AboutUnifiedPanel({required this.show});
+  const _AboutUnifiedPanel({required this.show, required this.onPersonTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1965,35 +2538,48 @@ class _AboutUnifiedPanel extends StatelessWidget {
               spacing: 6,
               runSpacing: 6,
               children: castList.map((actor) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.onSurface.withOpacity(0.04),
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => onPersonTap(actor, 'Actor'),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: theme.colorScheme.outline.withOpacity(0.08),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Icon(
-                        Icons.person_outline_rounded,
-                        size: 14,
-                        color: theme.colorScheme.primary,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
                       ),
-                      const SizedBox(width: 5),
-                      Text(
-                        actor,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.onSurface.withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: theme.colorScheme.outline.withOpacity(0.08),
                         ),
                       ),
-                    ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Icon(
+                            Icons.person_outline_rounded,
+                            size: 14,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            actor,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 3),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 13,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 );
               }).toList(),
@@ -2006,6 +2592,9 @@ class _AboutUnifiedPanel extends StatelessWidget {
             icon: Icons.movie_creation_outlined,
             title: 'Director',
             value: show.director.isNotEmpty ? show.director : 'N/A',
+            onTap: show.director.isNotEmpty && show.director != 'N/A'
+                ? () => onPersonTap(show.director, 'Director')
+                : null,
           ),
           if (show.writer.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -2013,6 +2602,7 @@ class _AboutUnifiedPanel extends StatelessWidget {
               icon: Icons.edit_note_rounded,
               title: 'Writer',
               value: show.writer,
+              onTap: () => onPersonTap(show.writer, 'Writing'),
             ),
           ],
           if (show.language.isNotEmpty) ...[
@@ -2058,18 +2648,20 @@ class _CrewTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String value;
+  final VoidCallback? onTap;
 
   const _CrewTile({
     required this.icon,
     required this.title,
     required this.value,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Row(
+    final content = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Icon(icon, size: 16, color: theme.colorScheme.primary),
@@ -2088,10 +2680,461 @@ class _CrewTile extends StatelessWidget {
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: onTap != null
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurface,
+            ),
           ),
         ),
+        if (onTap != null)
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 16,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
       ],
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: content,
+      ),
+    );
+  }
+}
+
+// ============================================================
+// SIMILAR / RECOMMENDED CARD
+// ============================================================
+
+class _RecommendationCard extends StatelessWidget {
+  final TmdbDiscoverItem item;
+  final String? existingStatus;
+  final bool adding;
+  final VoidCallback onTap;
+  final VoidCallback? onAdd;
+
+  const _RecommendationCard({
+    required this.item,
+    required this.existingStatus,
+    required this.adding,
+    required this.onTap,
+    required this.onAdd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final typeLabel = item.mediaType == 'tv' ? 'Series' : 'Movie';
+    final year = item.year == 'N/A' ? '' : item.year;
+    final status = existingStatus;
+    final statusColor = status != null ? StatusStyle.color(status) : null;
+
+    return SizedBox(
+      width: 118,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Stack(
+              children: <Widget>[
+                PosterImage(
+                  url: item.posterUrl ?? '',
+                  width: 118,
+                  height: 166,
+                  radius: 12,
+                ),
+                if (status != null && statusColor != null)
+                  Positioned(
+                    left: 6,
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.92),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Icon(
+                            StatusStyle.icon(status),
+                            size: 11,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 3),
+                          Flexible(
+                            child: Text(
+                              status,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              item.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12.2,
+                height: 1.15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    year.isEmpty ? typeLabel : '$typeLabel • $year',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.2,
+                      fontWeight: FontWeight.w600,
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (item.voteAverage > 0) ...<Widget>[
+                  const SizedBox(width: 3),
+                  const Icon(
+                    Icons.star_rounded,
+                    size: 10.5,
+                    color: Color(0xFFFFC400),
+                  ),
+                  const SizedBox(width: 1),
+                  Text(
+                    item.voteAverage.toStringAsFixed(1),
+                    style: TextStyle(
+                      fontSize: 9.8,
+                      fontWeight: FontWeight.w700,
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (status == null) ...<Widget>[
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                height: 29,
+                child: FilledButton.tonalIcon(
+                  onPressed: adding ? null : onAdd,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    visualDensity: VisualDensity.compact,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                  ),
+                  icon: adding
+                      ? const SizedBox(
+                          width: 11,
+                          height: 11,
+                          child: CircularProgressIndicator(strokeWidth: 1.5),
+                        )
+                      : const Icon(Icons.add_rounded, size: 14),
+                  label: Text(
+                    adding ? 'Adding' : 'Add',
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// HD BACKDROP SCREEN
+// ============================================================
+
+class _HdBackdropScreen extends StatefulWidget {
+  final String title;
+  final List<String> backdropUrls;
+
+  const _HdBackdropScreen({required this.title, required this.backdropUrls});
+
+  @override
+  State<_HdBackdropScreen> createState() => _HdBackdropScreenState();
+}
+
+class _HdBackdropScreenState extends State<_HdBackdropScreen> {
+  late final PageController _pageController;
+  int _index = 0;
+  bool _busy = false;
+
+  String get _currentBackdropUrl {
+    if (widget.backdropUrls.isEmpty) {
+      return '';
+    }
+
+    return widget.backdropUrls[_index.clamp(0, widget.backdropUrls.length - 1)];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  String _safeFileName(String value) {
+    final clean = value
+        .replaceAll(RegExp(r'[^\w\s-]+'), '_')
+        .replaceAll(RegExp(r'\s+'), '_')
+        .trim();
+
+    return clean.isEmpty ? 'watcher_backdrop' : clean;
+  }
+
+  Future<File> _downloadCurrentBackdrop({required bool permanent}) async {
+    final url = _currentBackdropUrl;
+
+    if (url.isEmpty) {
+      throw Exception('Backdrop URL is empty.');
+    }
+
+    final response = await http.get(Uri.parse(url));
+
+    if (response.statusCode != 200) {
+      throw Exception('Backdrop download failed.');
+    }
+
+    final directory = permanent
+        ? await getApplicationDocumentsDirectory()
+        : await getTemporaryDirectory();
+
+    final file = File(
+      '${directory.path}/'
+      '${_safeFileName(widget.title)}_backdrop_${_index + 1}.jpg',
+    );
+
+    await file.writeAsBytes(response.bodyBytes, flush: true);
+
+    return file;
+  }
+
+  Future<void> _shareBackdrop() async {
+    if (_busy) {
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final file = await _downloadCurrentBackdrop(permanent: false);
+
+      await Share.shareXFiles(
+        <XFile>[XFile(file.path, mimeType: 'image/jpeg')],
+        subject: widget.title,
+        text: widget.title,
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not share the backdrop.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _saveBackdrop() async {
+    if (_busy) {
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final file = await _downloadCurrentBackdrop(permanent: false);
+
+      var hasAccess = await Gal.hasAccess();
+
+      if (!hasAccess) {
+        await Gal.requestAccess();
+        hasAccess = await Gal.hasAccess();
+      }
+
+      if (!hasAccess) {
+        throw Exception('Gallery permission denied.');
+      }
+
+      await Gal.putImage(file.path);
+
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Backdrop saved to Gallery.')),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not save the backdrop to Gallery.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.backdropUrls.length;
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        title: Text(
+          widget.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Save',
+            onPressed: _busy ? null : _saveBackdrop,
+            icon: const Icon(Icons.download_rounded, color: Colors.white),
+          ),
+          IconButton(
+            tooltip: 'Share',
+            onPressed: _busy ? null : _shareBackdrop,
+            icon: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Icon(Icons.share_rounded, color: Colors.white),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: <Widget>[
+          PageView.builder(
+            controller: _pageController,
+            itemCount: total,
+            onPageChanged: (value) {
+              setState(() {
+                _index = value;
+              });
+            },
+            itemBuilder: (context, index) {
+              final backdropUrl = widget.backdropUrls[index];
+
+              return Center(
+                child: InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 4.0,
+                  child: CachedNetworkImage(
+                    imageUrl: backdropUrl,
+                    fit: BoxFit.contain,
+                    placeholder: (context, url) => const Center(
+                      child: CircularProgressIndicator(color: Colors.white24),
+                    ),
+                    errorWidget: (context, url, error) => const Text(
+                      'Could not load HD backdrop.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          if (total > 1)
+            Positioned(
+              bottom: 28,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.55),
+                    borderRadius: BorderRadius.circular(100),
+                    border: Border.all(color: Colors.white.withOpacity(0.18)),
+                  ),
+                  child: Text(
+                    '${_index + 1} / $total',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -2134,14 +3177,30 @@ class _HdPosterScreenState extends State<_HdPosterScreen> {
     super.dispose();
   }
 
-  Future<void> _shareOrSave() async {
-    if (_downloading) {
-      return;
-    }
-
+  Future<File> _downloadCurrentPoster() async {
     final posterUrl = _currentPosterUrl;
 
     if (posterUrl.isEmpty) {
+      throw Exception('Poster URL is empty.');
+    }
+
+    final response = await http.get(Uri.parse(posterUrl));
+
+    if (response.statusCode != 200) {
+      throw Exception('Poster download failed.');
+    }
+
+    final tempDir = await getTemporaryDirectory();
+    final cleanTitle = widget.title.replaceAll(RegExp(r'[^\w\s]+'), '_');
+    final file = File('${tempDir.path}/${cleanTitle}_poster_${_index + 1}.jpg');
+
+    await file.writeAsBytes(response.bodyBytes, flush: true);
+
+    return file;
+  }
+
+  Future<void> _sharePoster() async {
+    if (_downloading) {
       return;
     }
 
@@ -2152,19 +3211,7 @@ class _HdPosterScreenState extends State<_HdPosterScreen> {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      final response = await http.get(Uri.parse(posterUrl));
-
-      if (response.statusCode != 200) {
-        throw Exception();
-      }
-
-      final tempDir = await getTemporaryDirectory();
-      final cleanTitle = widget.title.replaceAll(RegExp(r'[^\w\s]+'), '_');
-      final file = File(
-        '${tempDir.path}/${cleanTitle}_poster_${_index + 1}.jpg',
-      );
-
-      await file.writeAsBytes(response.bodyBytes);
+      final file = await _downloadCurrentPoster();
 
       await Share.shareXFiles(
         <XFile>[XFile(file.path, mimeType: 'image/jpeg')],
@@ -2173,9 +3220,50 @@ class _HdPosterScreenState extends State<_HdPosterScreen> {
       );
     } catch (_) {
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Could not download or share the poster.'),
-        ),
+        const SnackBar(content: Text('Could not share the poster.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _downloading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _savePoster() async {
+    if (_downloading) {
+      return;
+    }
+
+    setState(() {
+      _downloading = true;
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final file = await _downloadCurrentPoster();
+
+      var hasAccess = await Gal.hasAccess();
+
+      if (!hasAccess) {
+        await Gal.requestAccess();
+        hasAccess = await Gal.hasAccess();
+      }
+
+      if (!hasAccess) {
+        throw Exception('Gallery permission denied.');
+      }
+
+      await Gal.putImage(file.path);
+
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Poster saved to Gallery.')),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not save the poster to Gallery.')),
       );
     } finally {
       if (mounted) {
@@ -2201,6 +3289,13 @@ class _HdPosterScreenState extends State<_HdPosterScreen> {
         ),
         actions: <Widget>[
           IconButton(
+            tooltip: 'Save',
+            onPressed: _downloading ? null : _savePoster,
+            icon: const Icon(Icons.download_rounded, color: Colors.white),
+          ),
+          IconButton(
+            tooltip: 'Share',
+            onPressed: _downloading ? null : _sharePoster,
             icon: _downloading
                 ? const SizedBox(
                     width: 18,
@@ -2211,7 +3306,6 @@ class _HdPosterScreenState extends State<_HdPosterScreen> {
                     ),
                   )
                 : const Icon(Icons.share_rounded, color: Colors.white),
-            onPressed: _shareOrSave,
           ),
         ],
       ),

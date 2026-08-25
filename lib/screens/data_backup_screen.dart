@@ -7,6 +7,7 @@ import '../models/show.dart';
 import '../providers/cloud_backup_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/show_provider.dart';
+import '../services/cloud_auto_backup_controller.dart';
 import '../services/google_drive_backup_service.dart';
 import '../services/poster_cache_service.dart';
 import '../services/storage_service.dart';
@@ -346,36 +347,40 @@ class _DataBackupScreenState extends State<DataBackupScreen> {
     }
   }
 
-  Future<void> _setAutoBackup(bool enabled) async {
+  Future<void> _setBackupAndSync(bool enabled) async {
     if (_cloudWorking) return;
     setState(() => _cloudWorking = true);
 
     try {
       final cloud = context.read<CloudBackupProvider>();
-      final success = await cloud.setAutoBackupEnabled(enabled);
-
+      final success = await cloud.setBackupAndSyncEnabled(enabled);
       if (!mounted) return;
 
       if (!success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(cloud.lastError ?? 'Could not update Auto Backup.'),
+            content: Text(cloud.lastError ?? 'Could not update Backup & Sync.'),
           ),
         );
         return;
       }
+
+      if (enabled) {
+        await CloudAutoBackupController.active?.syncNow();
+      }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not update Auto Backup.')),
+        const SnackBar(content: Text('Could not update Backup & Sync.')),
       );
     } finally {
       if (mounted) setState(() => _cloudWorking = false);
     }
   }
 
-  Future<void> _backupNowToCloud() async {
+  Future<void> _syncNow() async {
     if (_cloudWorking) return;
+
     final cloud = context.read<CloudBackupProvider>();
 
     if (!cloud.isConnected) {
@@ -386,35 +391,19 @@ class _DataBackupScreenState extends State<DataBackupScreen> {
     setState(() => _cloudWorking = true);
 
     try {
-      final shows = context.read<ShowProvider>().allShows;
-      final jsonData = await StorageService.encodeBackup(
-        shows,
-      ); // Fixed with await
-      final info = await GoogleDriveBackupService.instance.uploadBackupJson(
-        jsonData,
-      );
+      final success =
+          await CloudAutoBackupController.active?.syncNow() ?? false;
 
-      await cloud.markCloudBackupCompleted(info: info);
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Successfully backed up ${shows.length} items to Google Drive!',
+            success
+                ? 'Sync & Backup completed.'
+                : 'Could not sync & backup right now. Please try again.',
           ),
         ),
-      );
-    } on GoogleDriveAuthorizationRequiredException {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Permission required. Please reconnect Google Drive.'),
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to backup to Google Drive.')),
       );
     } finally {
       if (mounted) setState(() => _cloudWorking = false);
@@ -880,6 +869,7 @@ class _DataBackupScreenState extends State<DataBackupScreen> {
 
     final cloudBackupDate = cloud.lastCloudBackupAt ?? cloud.cloudModifiedTime;
     final cloudBackupText = _formatHistoryDateTime(cloudBackupDate);
+    final cloudSyncText = _formatHistoryDateTime(cloud.lastCloudSyncAt);
     final busy =
         _working ||
         _cloudWorking ||
@@ -908,14 +898,16 @@ class _DataBackupScreenState extends State<DataBackupScreen> {
                 _SectionHeader(title: 'Google Drive Sync'),
                 _GoogleDriveSyncCard(
                   connected: cloud.isConnected,
-                  autoBackupEnabled: cloud.autoBackupEnabled,
+                  backupAndSyncEnabled:
+                      cloud.autoBackupEnabled && cloud.autoSyncEnabled,
                   email: cloud.email,
                   lastBackupText: cloudBackupText,
+                  lastSyncText: cloudSyncText,
                   hasCloudBackup: cloud.hasCloudBackup,
                   busy: busy,
-                  onAutoBackupChanged: _setAutoBackup,
+                  onBackupAndSyncChanged: _setBackupAndSync,
+                  onSyncNow: _syncNow,
                   onRefresh: _refreshCloudInfo,
-                  onBackupNow: _backupNowToCloud,
                   onRestore: _restoreFromCloud,
                   onConnect: _connectGoogle,
                 ),
@@ -1079,27 +1071,29 @@ class _SettingsDivider extends StatelessWidget {
 
 class _GoogleDriveSyncCard extends StatelessWidget {
   final bool connected;
-  final bool autoBackupEnabled;
+  final bool backupAndSyncEnabled;
   final String? email;
   final String lastBackupText;
+  final String lastSyncText;
   final bool hasCloudBackup;
   final bool busy;
-  final Future<void> Function(bool) onAutoBackupChanged;
+  final Future<void> Function(bool) onBackupAndSyncChanged;
+  final Future<void> Function() onSyncNow;
   final Future<void> Function() onRefresh;
-  final Future<void> Function() onBackupNow;
   final Future<void> Function() onRestore;
   final Future<bool> Function() onConnect;
 
   const _GoogleDriveSyncCard({
     required this.connected,
-    required this.autoBackupEnabled,
+    required this.backupAndSyncEnabled,
     required this.email,
     required this.lastBackupText,
+    required this.lastSyncText,
     required this.hasCloudBackup,
     required this.busy,
-    required this.onAutoBackupChanged,
+    required this.onBackupAndSyncChanged,
+    required this.onSyncNow,
     required this.onRefresh,
-    required this.onBackupNow,
     required this.onRestore,
     required this.onConnect,
   });
@@ -1135,9 +1129,7 @@ class _GoogleDriveSyncCard extends StatelessWidget {
                   color: connectedColor,
                 ),
               ),
-
               const SizedBox(width: 10),
-
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1154,9 +1146,9 @@ class _GoogleDriveSyncCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       connected
-                          ? (autoBackupEnabled
-                                ? 'Connected and auto backup is active'
-                                : 'Connected but auto backup is off')
+                          ? (backupAndSyncEnabled
+                                ? 'Connected • Backup & Sync is active'
+                                : 'Connected • Backup & Sync is off')
                           : 'Connect to protect your library',
                       style: TextStyle(
                         color: colors.onSurfaceVariant,
@@ -1168,14 +1160,13 @@ class _GoogleDriveSyncCard extends StatelessWidget {
                   ],
                 ),
               ),
-
               if (connected)
-                Transform.scale(
-                  scale: 0.82,
-                  child: Switch.adaptive(
-                    value: autoBackupEnabled,
-                    onChanged: busy ? null : onAutoBackupChanged,
-                  ),
+                Icon(
+                  backupAndSyncEnabled
+                      ? Icons.sync_rounded
+                      : Icons.cloud_queue_rounded,
+                  color: connectedColor,
+                  size: 21,
                 ),
             ],
           ),
@@ -1223,7 +1214,48 @@ class _GoogleDriveSyncCard extends StatelessWidget {
             ],
 
             const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+              decoration: BoxDecoration(
+                color: colors.onSurface.withOpacity(0.028),
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: colors.outline.withOpacity(0.075)),
+              ),
+              child: Row(
+                children: <Widget>[
+                  const Icon(Icons.sync_rounded, size: 17),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Text(
+                          'Backup & Sync',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          backupAndSyncEnabled
+                              ? 'Auto backup + multi-device sync enabled'
+                              : 'Automatic backup and sync paused',
+                          style: const TextStyle(fontSize: 10.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch.adaptive(
+                    value: backupAndSyncEnabled,
+                    onChanged: busy ? null : onBackupAndSyncChanged,
+                  ),
+                ],
+              ),
+            ),
 
+            const SizedBox(height: 10),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
@@ -1291,54 +1323,95 @@ class _GoogleDriveSyncCard extends StatelessWidget {
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+              decoration: BoxDecoration(
+                color: colors.primary.withOpacity(0.07),
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: colors.primary.withOpacity(0.14)),
+              ),
+              child: Row(
+                children: <Widget>[
+                  Icon(Icons.sync_rounded, size: 17, color: colors.primary),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Last synced',
+                          style: TextStyle(
+                            color: colors.onSurfaceVariant,
+                            fontSize: 10.8,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          lastSyncText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colors.onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: busy
-                        ? null
-                        : () {
-                            onBackupNow();
-                          },
-                    icon: const Icon(Icons.cloud_upload_rounded, size: 17),
-                    label: const Text(
-                      'Back Up',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    style: FilledButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                    ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: busy
+                    ? null
+                    : () {
+                        onSyncNow();
+                      },
+                icon: const Icon(Icons.sync_rounded, size: 17),
+                label: const Text(
+                  'Sync & Backup Now',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(13),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: busy || !hasCloudBackup
-                        ? null
-                        : () {
-                            onRestore();
-                          },
-                    icon: const Icon(Icons.restore_rounded, size: 17),
-                    label: const Text(
-                      'Restore',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    style: FilledButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                    ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                onPressed: busy || !hasCloudBackup
+                    ? null
+                    : () {
+                        onRestore();
+                      },
+                icon: const Icon(Icons.restore_rounded, size: 17),
+                label: const Text(
+                  'Restore from Google Drive',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(13),
                   ),
                 ),
-              ],
+              ),
             ),
           ] else ...<Widget>[
             const SizedBox(height: 12),

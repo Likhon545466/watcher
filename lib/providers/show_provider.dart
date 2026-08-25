@@ -49,7 +49,12 @@ class ShowProvider with ChangeNotifier {
 
   static const Duration _seriesMetadataSyncInterval = Duration(hours: 6);
 
+  static const String _deletedShowTombstonesKey =
+      'watcher_deleted_show_tombstones_v1';
+
   List<Show> _shows = <Show>[];
+
+  final Map<String, DateTime> _deletedShowTombstones = <String, DateTime>{};
 
   String _selectedCategory = 'All';
   String _searchQuery = '';
@@ -76,6 +81,9 @@ class ShowProvider with ChangeNotifier {
   String get searchQuery => _searchQuery;
 
   bool get loading => _loading;
+
+  Map<String, DateTime> get deletedShowTombstones =>
+      Map<String, DateTime>.unmodifiable(_deletedShowTombstones);
 
   // ==========================================================
   // FILTERED SHOWS
@@ -402,6 +410,8 @@ class ShowProvider with ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
 
+    _loadDeletedShowTombstones(prefs);
+
     final raw = prefs.getString(StorageService.showsKey);
 
     if (raw == null || raw.trim().isEmpty) {
@@ -485,7 +495,29 @@ class ShowProvider with ChangeNotifier {
       return false;
     }
 
-    _shows.add(show.copyWith(updatedAt: DateTime.now()));
+    final addedShow = show.copyWith(updatedAt: DateTime.now());
+
+    _shows.add(addedShow);
+
+    _deletedShowTombstones.remove(show.id);
+
+    // ========================================================
+    // SERIES ADDED DIRECTLY AS COMPLETED
+    // ========================================================
+    //
+    // Discover Details and recommendation Quick Add can create a
+    // brand-new series with status already set to Completed. In
+    // that case setStatus() is never involved, so the normal
+    // completion reconciliation would otherwise be skipped.
+    //
+    // Run the same central completion path here so every add flow
+    // produces consistent season/episode progress.
+    // ========================================================
+
+    if (addedShow.isSeries && addedShow.status == 'Completed') {
+      await _setSeriesCompleted(addedShow);
+      return true;
+    }
 
     await _save();
 
@@ -527,6 +559,8 @@ class ShowProvider with ChangeNotifier {
     }
 
     _shows[index] = safeUpdated;
+
+    _deletedShowTombstones.remove(safeUpdated.id);
 
     await _save();
 
@@ -660,6 +694,8 @@ class ShowProvider with ChangeNotifier {
 
     _shows.removeWhere((show) => show.id == id);
 
+    _deletedShowTombstones[id] = DateTime.now().toUtc();
+
     await _save();
 
     notifyListeners();
@@ -676,6 +712,22 @@ class ShowProvider with ChangeNotifier {
       return;
     }
 
+    // ========================================================
+    // SERIES -> COMPLETED
+    // ========================================================
+    //
+    // Changing a series to Completed should also make its saved
+    // progress consistent with that status. This is handled here
+    // in the provider so Home, Discover and Details all behave
+    // the same way.
+    //
+    // ========================================================
+
+    if (show.isSeries && status == 'Completed') {
+      await _setSeriesCompleted(show);
+      return;
+    }
+
     final shouldMarkAsWatched = status == 'Watching' || status == 'Completed';
 
     await updateShow(
@@ -687,6 +739,106 @@ class ShowProvider with ChangeNotifier {
             : show.lastWatchedAt,
       ),
     );
+  }
+
+  // ==========================================================
+  // COMPLETE SERIES FROM STATUS CHANGE
+  // ==========================================================
+
+  Future<void> _setSeriesCompleted(Show original) async {
+    var show = original;
+
+    // First refresh the currently known season. This can update
+    // totalSeasons and reveal a newer/final season before we
+    // calculate the completion target.
+    if (_canResolveSeries(show)) {
+      try {
+        await _syncOneSeries(show.id, show.currentSeason, forceRefresh: true);
+
+        show = byId(show.id) ?? show;
+      } catch (_) {
+        // Existing saved metadata is still safe to use.
+      }
+    }
+
+    int finalSeason = show.totalSeasons > 0 ? show.totalSeasons : 1;
+
+    for (final season in show.seasonEpisodeCounts.keys) {
+      if (season > finalSeason) {
+        finalSeason = season;
+      }
+    }
+
+    for (final season in show.seasonProgress.keys) {
+      if (season > finalSeason) {
+        finalSeason = season;
+      }
+    }
+
+    // If the final season differs from the current one, fetch that
+    // season specifically so its episode count is as fresh as possible.
+    if (_canResolveSeries(show) && finalSeason != show.currentSeason) {
+      try {
+        await _syncOneSeries(show.id, finalSeason, forceRefresh: true);
+
+        show = byId(show.id) ?? show;
+
+        if (show.totalSeasons > finalSeason) {
+          finalSeason = show.totalSeasons;
+
+          await _syncOneSeries(show.id, finalSeason, forceRefresh: true);
+
+          show = byId(show.id) ?? show;
+        }
+      } catch (_) {
+        // Fall back to already-saved metadata.
+      }
+    }
+
+    final progress = Map<int, int>.from(show.seasonProgress);
+    final counts = Map<int, int>.from(show.seasonEpisodeCounts);
+
+    // Mark every season with a known episode count as complete.
+    for (final entry in counts.entries) {
+      final season = entry.key;
+      final count = entry.value;
+
+      if (season > 0 && count > 0) {
+        progress[season] = count;
+      }
+    }
+
+    var finalEpisode = counts[finalSeason] ?? 0;
+
+    // If TMDB does not yet expose a final count, keep the best
+    // known progress instead of inventing an arbitrary episode.
+    if (finalEpisode <= 0) {
+      finalEpisode = progress[finalSeason] ?? 0;
+    }
+
+    if (finalEpisode <= 0 && finalSeason == show.currentSeason) {
+      finalEpisode = show.currentEpisode;
+    }
+
+    if (finalEpisode > 0) {
+      progress[finalSeason] = finalEpisode;
+    }
+
+    final now = DateTime.now();
+
+    final updated = show.copyWith(
+      status: 'Completed',
+
+      currentSeason: finalSeason,
+
+      currentEpisode: finalEpisode,
+
+      seasonProgress: progress,
+
+      lastWatchedAt: now,
+    );
+
+    await updateShow(updated);
   }
 
   // ==========================================================
@@ -1886,6 +2038,36 @@ class ShowProvider with ChangeNotifier {
       updatedAt: show.updatedAt,
     );
 
+    // ========================================================
+    // KEEP COMPLETED SERIES PROGRESS IN SYNC WITH NEW METADATA
+    // ========================================================
+    //
+    // A title may be saved as Completed before TMDB has returned
+    // its episode count. When that metadata arrives later, fill the
+    // synced season to its known count instead of leaving Completed
+    // with partial/zero progress.
+    // ========================================================
+
+    if (updated.status == 'Completed' && safeCount > 0) {
+      final completedProgress = Map<int, int>.from(updated.seasonProgress);
+
+      completedProgress[season] = safeCount;
+
+      final completedCurrentEpisode = updated.currentSeason == season
+          ? safeCount
+          : updated.currentEpisode;
+
+      updated = updated.copyWith(
+        currentEpisode: completedCurrentEpisode,
+
+        seasonProgress: completedProgress,
+
+        lastWatchedAt: show.lastWatchedAt,
+
+        updatedAt: show.updatedAt,
+      );
+    }
+
     if (updated.isSeriesFullyWatched && updated.status != 'Completed') {
       updated = updated.copyWith(
         status: 'Completed',
@@ -1904,6 +2086,19 @@ class ShowProvider with ChangeNotifier {
   // ==========================================================
 
   Future<void> replaceAll(List<Show> shows) async {
+    final replacementIds = shows.map((show) => show.id).toSet();
+    final deletedAt = DateTime.now().toUtc();
+
+    for (final existing in _shows) {
+      if (!replacementIds.contains(existing.id)) {
+        _deletedShowTombstones[existing.id] = deletedAt;
+      }
+    }
+
+    for (final replacement in shows) {
+      _deletedShowTombstones.remove(replacement.id);
+    }
+
     // Cancel reminders belonging to the previous library.
     for (final show in _shows) {
       if (show.isSeries) {
@@ -1957,6 +2152,7 @@ class ShowProvider with ChangeNotifier {
         }
 
         _shows.add(showToAdd);
+        _deletedShowTombstones.remove(showToAdd.id);
 
         addedCount++;
       }
@@ -1969,6 +2165,173 @@ class ShowProvider with ChangeNotifier {
     }
 
     return addedCount;
+  }
+
+  // ==========================================================
+  // MULTI-DEVICE CLOUD SYNC
+  // ==========================================================
+
+  Future<bool> mergeCloudSyncState(
+    List<Show> cloudShows,
+    Map<String, DateTime> cloudDeletedShows,
+  ) async {
+    final localById = <String, Show>{for (final show in _shows) show.id: show};
+    final cloudById = <String, Show>{
+      for (final show in cloudShows) show.id: show,
+    };
+
+    final mergedDeleted = <String, DateTime>{..._deletedShowTombstones};
+
+    cloudDeletedShows.forEach((id, cloudDeletedAt) {
+      final existing = mergedDeleted[id];
+      final normalized = cloudDeletedAt.toUtc();
+
+      if (existing == null || normalized.isAfter(existing)) {
+        mergedDeleted[id] = normalized;
+      }
+    });
+
+    final allIds = <String>{
+      ...localById.keys,
+      ...cloudById.keys,
+      ...mergedDeleted.keys,
+    };
+
+    final mergedShows = <Show>[];
+
+    for (final id in allIds) {
+      final local = localById[id];
+      final cloud = cloudById[id];
+      final deletedAt = mergedDeleted[id];
+
+      Show? newest;
+
+      if (local != null && cloud != null) {
+        newest = cloud.updatedAt.toUtc().isAfter(local.updatedAt.toUtc())
+            ? cloud
+            : local;
+      } else {
+        newest = local ?? cloud;
+      }
+
+      if (newest == null) {
+        continue;
+      }
+
+      if (deletedAt != null &&
+          !newest.updatedAt.toUtc().isAfter(deletedAt.toUtc())) {
+        continue;
+      }
+
+      // A newer explicit add/update wins over an older deletion tombstone.
+      if (deletedAt != null && newest.updatedAt.toUtc().isAfter(deletedAt)) {
+        mergedDeleted.remove(id);
+      }
+
+      mergedShows.add(newest);
+    }
+
+    mergedShows.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    final before = jsonEncode(_shows.map((show) => show.toJson()).toList());
+    final after = jsonEncode(mergedShows.map((show) => show.toJson()).toList());
+    final tombstonesChanged = !_sameDeletionMap(
+      _deletedShowTombstones,
+      mergedDeleted,
+    );
+
+    if (before == after && !tombstonesChanged) {
+      return false;
+    }
+
+    _shows = mergedShows;
+    _deletedShowTombstones
+      ..clear()
+      ..addAll(mergedDeleted);
+
+    // Reconcile reminders on this device. Reminder scheduling itself is local,
+    // while the preference/target fields remain synced in the Show model.
+    for (int i = 0; i < _shows.length; i++) {
+      final show = _shows[i];
+
+      if (!show.isSeries || !show.episodeReminderEnabled) {
+        continue;
+      }
+
+      _shows[i] = await _reconcileReminderForShow(show, forceSchedule: true);
+    }
+
+    await _save();
+    notifyListeners();
+
+    return true;
+  }
+
+  bool _sameDeletionMap(
+    Map<String, DateTime> first,
+    Map<String, DateTime> second,
+  ) {
+    if (first.length != second.length) {
+      return false;
+    }
+
+    for (final entry in first.entries) {
+      final other = second[entry.key];
+
+      if (other == null ||
+          other.toUtc().millisecondsSinceEpoch !=
+              entry.value.toUtc().millisecondsSinceEpoch) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  void _loadDeletedShowTombstones(SharedPreferences prefs) {
+    _deletedShowTombstones.clear();
+
+    final raw = prefs.getString(_deletedShowTombstonesKey);
+
+    if (raw == null || raw.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+
+      if (decoded is! Map) {
+        return;
+      }
+
+      decoded.forEach((key, value) {
+        final id = key.toString().trim();
+        final date = DateTime.tryParse(value?.toString() ?? '');
+
+        if (id.isNotEmpty && date != null) {
+          _deletedShowTombstones[id] = date.toUtc();
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveDeletedShowTombstones(SharedPreferences prefs) async {
+    // Keep tombstones for a bounded period. This prevents the map from growing
+    // forever while still protecting normal multi-device sync gaps.
+    final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 180));
+
+    _deletedShowTombstones.removeWhere(
+      (_, deletedAt) => deletedAt.toUtc().isBefore(cutoff),
+    );
+
+    await prefs.setString(
+      _deletedShowTombstonesKey,
+      jsonEncode(
+        _deletedShowTombstones.map(
+          (id, deletedAt) => MapEntry(id, deletedAt.toUtc().toIso8601String()),
+        ),
+      ),
+    );
   }
 
   // ==========================================================
@@ -2026,5 +2389,7 @@ class ShowProvider with ChangeNotifier {
       StorageService.showsKey,
       jsonEncode(_shows.map((show) => show.toJson()).toList()),
     );
+
+    await _saveDeletedShowTombstones(prefs);
   }
 }

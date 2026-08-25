@@ -325,6 +325,11 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   // ==========================================================
   // PAGINATION
   // ==========================================================
+  //
+  // TMDB service diversifies later pages by alternating
+  // industry/language and genre lanes. The screen itself keeps
+  // the same lightweight one-page-at-a-time loading behavior.
+  //
 
   Future<void> _loadMore(DiscoverFilter filter, TmdbMediaType media) async {
     final key = _combinationKey(filter, media);
@@ -994,6 +999,23 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   // ==========================================================
+  // DISCOVER SEARCH
+  // ==========================================================
+
+  Future<void> _openDiscoverSearch() async {
+    final result = await showSearch<TmdbDiscoverItem?>(
+      context: context,
+      delegate: _DiscoverScreenSearchDelegate(),
+    );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    _openDiscoverItem(result);
+  }
+
+  // ==========================================================
   // BUILD
   // ==========================================================
 
@@ -1027,13 +1049,24 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           // TITLE
           // ==================================================
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
-            child: Text(
-              'Discover',
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.5,
-              ),
+            padding: const EdgeInsets.fromLTRB(18, 8, 10, 6),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Discover',
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Search Discover',
+                  onPressed: _openDiscoverSearch,
+                  icon: const Icon(Icons.search_rounded),
+                ),
+              ],
             ),
           ),
 
@@ -1133,7 +1166,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               child: PageView.builder(
                 controller: _pageController,
                 physics: const BouncingScrollPhysics(),
-                allowImplicitScrolling: true,
+                allowImplicitScrolling: false,
                 onPageChanged: _onPageChanged,
                 itemCount: _filters.length,
                 itemBuilder: (context, catIndex) {
@@ -1195,7 +1228,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                   return NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification.metrics.axis == Axis.vertical &&
-                          notification.metrics.extentAfter < 500) {
+                          notification.metrics.extentAfter < 650) {
                         _loadMore(filter, media);
                       }
 
@@ -1211,7 +1244,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                           parent: BouncingScrollPhysics(),
                         ),
 
-                        cacheExtent: 500,
+                        cacheExtent: 350,
 
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 135),
 
@@ -1600,64 +1633,61 @@ class _MainCategoryButton extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(16),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              height: 46,
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              decoration: BoxDecoration(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            height: 46,
+            padding: const EdgeInsets.symmetric(horizontal: 5),
+            decoration: BoxDecoration(
+              color: selected
+                  ? color.withOpacity(isDark ? 0.26 : 0.18)
+                  : isDark
+                  ? Colors.white.withOpacity(0.07)
+                  : Colors.black.withOpacity(0.035),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
                 color: selected
-                    ? color.withOpacity(isDark ? 0.26 : 0.18)
+                    ? color.withOpacity(0.78)
                     : isDark
-                    ? Colors.white.withOpacity(0.07)
-                    : Colors.black.withOpacity(0.035),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: selected
-                      ? color.withOpacity(0.78)
-                      : isDark
-                      ? Colors.white.withOpacity(0.14)
-                      : Colors.black.withOpacity(0.09),
-                  width: selected ? 1.3 : 1,
-                ),
+                    ? Colors.white.withOpacity(0.14)
+                    : Colors.black.withOpacity(0.09),
+                width: selected ? 1.3 : 1,
               ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.center,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Icon(
-                        icon,
-                        size: 15,
-                        color: selected
-                            ? color
-                            : theme.colorScheme.onSurfaceVariant,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      icon,
+                      size: 15,
+                      color: selected
+                          ? color
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(
+                        fontSize: 11.2,
+                        fontWeight: selected
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        color: selected ? color : theme.colorScheme.onSurface,
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        label,
-                        maxLines: 1,
-                        softWrap: false,
-                        style: TextStyle(
-                          fontSize: 11.2,
-                          fontWeight: selected
-                              ? FontWeight.w800
-                              : FontWeight.w600,
-                          color: selected ? color : theme.colorScheme.onSurface,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1695,58 +1725,377 @@ class _MediaFilterButton extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(18),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 170),
-              curve: Curves.easeOutCubic,
-              height: 36,
-              decoration: BoxDecoration(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 170),
+            curve: Curves.easeOutCubic,
+            height: 36,
+            decoration: BoxDecoration(
+              color: selected
+                  ? color.withOpacity(isDark ? 0.24 : 0.16)
+                  : isDark
+                  ? Colors.white.withOpacity(0.06)
+                  : Colors.black.withOpacity(0.03),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
                 color: selected
-                    ? color.withOpacity(isDark ? 0.24 : 0.16)
+                    ? color.withOpacity(0.72)
                     : isDark
-                    ? Colors.white.withOpacity(0.06)
-                    : Colors.black.withOpacity(0.03),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: selected
-                      ? color.withOpacity(0.72)
-                      : isDark
-                      ? Colors.white.withOpacity(0.13)
-                      : Colors.black.withOpacity(0.08),
-                  width: selected ? 1.25 : 1,
+                    ? Colors.white.withOpacity(0.13)
+                    : Colors.black.withOpacity(0.08),
+                width: selected ? 1.25 : 1,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(
+                  icon,
+                  size: 15,
+                  color: selected ? color : theme.colorScheme.onSurfaceVariant,
                 ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  Icon(
-                    icon,
-                    size: 15,
-                    color: selected
-                        ? color
-                        : theme.colorScheme.onSurfaceVariant,
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    color: selected ? color : theme.colorScheme.onSurface,
                   ),
-                  const SizedBox(width: 5),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                      color: selected ? color : theme.colorScheme.onSurface,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+// ============================================================
+// DISCOVER SCREEN TMDB SEARCH
+// ============================================================
+
+class _DiscoverScreenSearchDelegate extends SearchDelegate<TmdbDiscoverItem?> {
+  _DiscoverScreenSearchDelegate()
+    : super(searchFieldLabel: 'Search movie or series...');
+
+  @override
+  List<Widget>? buildActions(BuildContext context) {
+    return <Widget>[
+      if (query.isNotEmpty)
+        IconButton(
+          tooltip: 'Clear',
+          onPressed: () => query = '',
+          icon: const Icon(Icons.close_rounded),
+        ),
+    ];
+  }
+
+  @override
+  Widget? buildLeading(BuildContext context) {
+    return IconButton(
+      tooltip: 'Back',
+      onPressed: () => close(context, null),
+      icon: const Icon(Icons.arrow_back_rounded),
+    );
+  }
+
+  @override
+  Widget buildResults(BuildContext context) {
+    return _DiscoverScreenSearchResults(
+      query: query,
+      onSelect: (item) => close(context, item),
+    );
+  }
+
+  @override
+  Widget buildSuggestions(BuildContext context) {
+    return _DiscoverScreenSearchResults(
+      query: query,
+      onSelect: (item) => close(context, item),
+    );
+  }
+}
+
+class _DiscoverScreenSearchResults extends StatefulWidget {
+  final String query;
+  final ValueChanged<TmdbDiscoverItem> onSelect;
+
+  const _DiscoverScreenSearchResults({
+    required this.query,
+    required this.onSelect,
+  });
+
+  @override
+  State<_DiscoverScreenSearchResults> createState() =>
+      _DiscoverScreenSearchResultsState();
+}
+
+class _DiscoverScreenSearchResultsState
+    extends State<_DiscoverScreenSearchResults> {
+  Timer? _debounce;
+  List<TmdbDiscoverItem> _results = const <TmdbDiscoverItem>[];
+  bool _loading = false;
+  String? _error;
+  int _requestId = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleSearch();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DiscoverScreenSearchResults oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.query != widget.query) {
+      _scheduleSearch();
+    }
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  ({String title, String? year}) _parseQuery(String raw) {
+    final trimmed = raw.trim();
+
+    final match = RegExp(
+      r'^(.*?)(?:\s*\(?(18|19|20)\d{2}\)?)\s*$',
+    ).firstMatch(trimmed);
+
+    if (match == null) {
+      return (title: trimmed, year: null);
+    }
+
+    final yearMatch = RegExp(
+      r'(18|19|20)\d{2}',
+    ).firstMatch(match.group(0) ?? '');
+
+    final title = (match.group(1) ?? '').trim();
+    final year = yearMatch?.group(0);
+
+    if (title.isEmpty || year == null) {
+      return (title: trimmed, year: null);
+    }
+
+    return (title: title, year: year);
+  }
+
+  bool _yearMatches(String source, String year) {
+    return RegExp(
+      r'(?<!\d)' + RegExp.escape(year) + r'(?!\d)',
+    ).hasMatch(source);
+  }
+
+  String _formatReleaseDate(String rawDate) {
+    final parsed = DateTime.tryParse(rawDate.trim());
+
+    if (parsed == null) {
+      return 'TBA';
+    }
+
+    const months = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    return '${months[parsed.month - 1]} ${parsed.day}, ${parsed.year}';
+  }
+
+  void _scheduleSearch() {
+    _debounce?.cancel();
+
+    final raw = widget.query.trim();
+
+    if (raw.length < 2) {
+      setState(() {
+        _results = const <TmdbDiscoverItem>[];
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    _debounce = Timer(const Duration(milliseconds: 450), () => _search(raw));
+  }
+
+  Future<void> _search(String raw) async {
+    final requestId = ++_requestId;
+
+    try {
+      final parsed = _parseQuery(raw);
+      final results = await TmdbService.searchTitles(parsed.title);
+
+      if (!mounted || requestId != _requestId) {
+        return;
+      }
+
+      final filtered = parsed.year == null
+          ? results
+          : results
+                .where((item) => _yearMatches(item.year, parsed.year!))
+                .toList(growable: false);
+
+      setState(() {
+        _results = filtered;
+        _loading = false;
+        _error = null;
+      });
+    } catch (_) {
+      if (!mounted || requestId != _requestId) {
+        return;
+      }
+
+      setState(() {
+        _results = const <TmdbDiscoverItem>[];
+        _loading = false;
+        _error = 'Could not search TMDB right now.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final raw = widget.query.trim();
+
+    if (raw.length < 2) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                Icons.manage_search_rounded,
+                size: 40,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Search Discover',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                'Search movies and series, including upcoming and unreleased titles.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_loading && _results.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: theme.colorScheme.error,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_results.isEmpty) {
+      return Center(
+        child: Text(
+          'No movie or series found.',
+          style: TextStyle(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      physics: const BouncingScrollPhysics(),
+      itemCount: _results.length,
+      separatorBuilder: (_, __) => Divider(
+        height: 1,
+        color: theme.colorScheme.outline.withOpacity(0.10),
+      ),
+      itemBuilder: (context, index) {
+        final item = _results[index];
+        final typeLabel = item.mediaType == 'tv' ? 'Series' : 'Movie';
+        final releaseDate = _formatReleaseDate(item.releaseDate);
+
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 4,
+          ),
+          leading: PosterImage(
+            url: item.posterUrl ?? '',
+            width: 42,
+            height: 62,
+            radius: 8,
+          ),
+          title: Text(
+            item.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+          ),
+          subtitle: Text(
+            '$typeLabel • $releaseDate',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 12.2,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          onTap: () => widget.onSelect(item),
+        );
+      },
     );
   }
 }

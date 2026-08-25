@@ -8,12 +8,19 @@ class CloudBackupProvider extends ChangeNotifier {
 
   static const String _autoBackupEnabledKey = 'cloud_backup_auto_enabled';
 
+  static const String _autoSyncEnabledKey = 'cloud_backup_auto_sync_enabled';
+
   static const String _backupOnboardingHandledKey =
       'cloud_backup_onboarding_handled';
+
+  static const String _googleAccountWasConnectedKey =
+      'cloud_backup_google_account_was_connected';
 
   static const String _lastCloudBackupAtKey = 'cloud_backup_last_backup_at';
 
   static const String _lastCloudRestoreAtKey = 'cloud_backup_last_restore_at';
+
+  static const String _lastCloudSyncAtKey = 'cloud_backup_last_sync_at';
 
   final GoogleDriveBackupService _driveService =
       GoogleDriveBackupService.instance;
@@ -23,6 +30,7 @@ class CloudBackupProvider extends ChangeNotifier {
   bool _connecting = false;
 
   bool _autoBackupEnabled = false;
+  bool _autoSyncEnabled = false;
   bool _backupOnboardingHandled = false;
 
   bool _hasCloudBackup = false;
@@ -30,6 +38,7 @@ class CloudBackupProvider extends ChangeNotifier {
 
   DateTime? _lastCloudBackupAt;
   DateTime? _lastCloudRestoreAt;
+  DateTime? _lastCloudSyncAt;
 
   GoogleDriveBackupInfo? _cloudBackupInfo;
 
@@ -55,6 +64,8 @@ class CloudBackupProvider extends ChangeNotifier {
 
   bool get autoBackupEnabled => _autoBackupEnabled;
 
+  bool get autoSyncEnabled => _autoSyncEnabled;
+
   bool get backupOnboardingHandled => _backupOnboardingHandled;
 
   bool get shouldShowBackupOnboarding =>
@@ -67,6 +78,8 @@ class CloudBackupProvider extends ChangeNotifier {
   DateTime? get lastCloudBackupAt => _lastCloudBackupAt;
 
   DateTime? get lastCloudRestoreAt => _lastCloudRestoreAt;
+
+  DateTime? get lastCloudSyncAt => _lastCloudSyncAt;
 
   GoogleDriveBackupInfo? get cloudBackupInfo => _cloudBackupInfo;
 
@@ -93,6 +106,13 @@ class CloudBackupProvider extends ChangeNotifier {
 
       _autoBackupEnabled = preferences.getBool(_autoBackupEnabledKey) ?? false;
 
+      final storedAutoSync = preferences.getBool(_autoSyncEnabledKey);
+      _autoSyncEnabled = storedAutoSync ?? _autoBackupEnabled;
+
+      if (storedAutoSync == null && _autoSyncEnabled) {
+        await preferences.setBool(_autoSyncEnabledKey, true);
+      }
+
       _backupOnboardingHandled =
           preferences.getBool(_backupOnboardingHandledKey) ?? false;
 
@@ -100,45 +120,73 @@ class CloudBackupProvider extends ChangeNotifier {
 
       final lastRestoreRaw = preferences.getString(_lastCloudRestoreAtKey);
 
+      final lastSyncRaw = preferences.getString(_lastCloudSyncAtKey);
+
       _lastCloudBackupAt = _parseStoredDateTime(lastBackupRaw);
 
       _lastCloudRestoreAt = _parseStoredDateTime(lastRestoreRaw);
 
+      _lastCloudSyncAt = _parseStoredDateTime(lastSyncRaw);
+
       /*
-       * GoogleDriveBackupService.initialize() restores the previous Google
-       * session using Google's lightweight auth flow.
+       * Initialize the Google Sign-In SDK first.
        *
-       * On some Android devices Google may show a short "Signing you in"
-       * screen. This is intentional here because the user wants the old
-       * auto-login + auto-backup behavior back.
+       * Only users who explicitly connected Google before are eligible for
+       * silent session restore. Guest/Skip users never trigger Google auth
+       * during normal app startup.
        */
       await _driveService.initialize();
 
-      if (_driveService.isConnected) {
-        if (!_backupOnboardingHandled) {
-          _backupOnboardingHandled = true;
+      final googleAccountWasConnected =
+          preferences.getBool(_googleAccountWasConnectedKey) ?? false;
 
-          await preferences.setBool(_backupOnboardingHandledKey, true);
+      if (googleAccountWasConnected) {
+        final restored = await _driveService.restorePreviousSession();
+
+        if (_driveService.isConnected) {
+          if (!_backupOnboardingHandled) {
+            _backupOnboardingHandled = true;
+            await preferences.setBool(_backupOnboardingHandledKey, true);
+          }
+
+          final authorized = await _driveService.hasDriveAuthorization();
+
+          if (authorized) {
+            await _refreshCloudBackupInfoInternal();
+          } else {
+            // Keep the user's Auto Backup preference unchanged.
+            // A restored Google account can become usable moments later,
+            // and the auto-backup controller will retry failed uploads.
+            debugPrint(
+              'Google account restored, but Drive authorization is not ready yet.',
+            );
+          }
+        } else if (!restored) {
+          /*
+           * Google no longer has a restorable account for this app.
+           * Stop retrying on every launch. The user can reconnect manually
+           * from Data & Backup later.
+           */
+          await preferences.setBool(_googleAccountWasConnectedKey, false);
+
+          if (_autoBackupEnabled) {
+            _autoBackupEnabled = false;
+            await preferences.setBool(_autoBackupEnabledKey, false);
+          }
+
+          if (_autoSyncEnabled) {
+            _autoSyncEnabled = false;
+            await preferences.setBool(_autoSyncEnabledKey, false);
+          }
         }
-
-        final authorized = await _driveService.hasDriveAuthorization();
-
-        if (authorized) {
-          await _refreshCloudBackupInfoInternal();
-        } else {
-          _autoBackupEnabled = false;
-
-          await preferences.setBool(_autoBackupEnabledKey, false);
-        }
-      } else if (_autoBackupEnabled) {
+      } else if (_autoBackupEnabled || _autoSyncEnabled) {
         /*
-         * Preference says Auto Backup was ON, but Google did not return
-         * an account for this session. Keep this safe by turning it off.
-         * The user can reconnect from Data & Backup.
+         * Guest/Skip state: never open Google UI automatically.
          */
         _autoBackupEnabled = false;
-
+        _autoSyncEnabled = false;
         await preferences.setBool(_autoBackupEnabledKey, false);
+        await preferences.setBool(_autoSyncEnabledKey, false);
       }
 
       _initialized = true;
@@ -186,9 +234,13 @@ class CloudBackupProvider extends ChangeNotifier {
 
       await preferences.setBool(_backupOnboardingHandledKey, true);
 
+      await preferences.setBool(_googleAccountWasConnectedKey, true);
+
       _autoBackupEnabled = true;
+      _autoSyncEnabled = true;
 
       await preferences.setBool(_autoBackupEnabledKey, true);
+      await preferences.setBool(_autoSyncEnabledKey, true);
 
       await _refreshCloudBackupInfoInternal();
 
@@ -216,10 +268,14 @@ class CloudBackupProvider extends ChangeNotifier {
     _backupOnboardingHandled = true;
 
     _autoBackupEnabled = false;
+    _autoSyncEnabled = false;
 
     await preferences.setBool(_backupOnboardingHandledKey, true);
 
+    await preferences.setBool(_googleAccountWasConnectedKey, false);
+
     await preferences.setBool(_autoBackupEnabledKey, false);
+    await preferences.setBool(_autoSyncEnabledKey, false);
 
     notifyListeners();
   }
@@ -239,57 +295,52 @@ class CloudBackupProvider extends ChangeNotifier {
   }
 
   // ==========================================================
-  // AUTO BACKUP TOGGLE
+  // BACKUP & SYNC MASTER TOGGLE
   // ==========================================================
 
-  Future<bool> setAutoBackupEnabled(bool enabled) async {
+  Future<bool> setBackupAndSyncEnabled(bool enabled) async {
     _lastError = null;
 
     if (!enabled) {
       _autoBackupEnabled = false;
-
+      _autoSyncEnabled = false;
       final preferences = await SharedPreferences.getInstance();
-
       await preferences.setBool(_autoBackupEnabledKey, false);
-
+      await preferences.setBool(_autoSyncEnabledKey, false);
       notifyListeners();
-
       return true;
     }
 
     if (!_driveService.isConnected) {
       final connected = await connectGoogle();
-
-      if (!connected) {
-        return false;
-      }
+      if (!connected) return false;
     }
 
     final authorized = await _driveService.hasDriveAuthorization();
-
     if (!authorized) {
       _lastError = 'Google Drive permission is required.';
-
-      _autoBackupEnabled = false;
-
       notifyListeners();
-
       return false;
     }
 
-    final preferences = await SharedPreferences.getInstance();
-
     _autoBackupEnabled = true;
-
+    _autoSyncEnabled = true;
     _backupOnboardingHandled = true;
 
+    final preferences = await SharedPreferences.getInstance();
     await preferences.setBool(_autoBackupEnabledKey, true);
-
+    await preferences.setBool(_autoSyncEnabledKey, true);
     await preferences.setBool(_backupOnboardingHandledKey, true);
-
     notifyListeners();
-
     return true;
+  }
+
+  Future<bool> setAutoBackupEnabled(bool enabled) async {
+    return setBackupAndSyncEnabled(enabled);
+  }
+
+  Future<bool> setAutoSyncEnabled(bool enabled) async {
+    return setBackupAndSyncEnabled(enabled);
   }
 
   // ==========================================================
@@ -381,6 +432,20 @@ class CloudBackupProvider extends ChangeNotifier {
   }
 
   // ==========================================================
+  // CLOUD SYNC COMPLETED
+  // ==========================================================
+
+  Future<void> markCloudSyncCompleted({DateTime? completedAt}) async {
+    final now = completedAt ?? DateTime.now();
+    _lastCloudSyncAt = now;
+
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_lastCloudSyncAtKey, now.toIso8601String());
+
+    notifyListeners();
+  }
+
+  // ==========================================================
   // SIGN OUT
   // ==========================================================
 
@@ -396,8 +461,12 @@ class CloudBackupProvider extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
 
     _autoBackupEnabled = false;
+    _autoSyncEnabled = false;
 
     await preferences.setBool(_autoBackupEnabledKey, false);
+    await preferences.setBool(_autoSyncEnabledKey, false);
+
+    await preferences.setBool(_googleAccountWasConnectedKey, false);
 
     _clearCloudInfo();
 
@@ -420,8 +489,12 @@ class CloudBackupProvider extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
 
     _autoBackupEnabled = false;
+    _autoSyncEnabled = false;
 
     await preferences.setBool(_autoBackupEnabledKey, false);
+    await preferences.setBool(_autoSyncEnabledKey, false);
+
+    await preferences.setBool(_googleAccountWasConnectedKey, false);
 
     _clearCloudInfo();
 

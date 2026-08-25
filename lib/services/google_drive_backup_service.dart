@@ -34,6 +34,13 @@ class GoogleDriveBackupInfo {
   }
 }
 
+class GoogleDriveBackupSnapshot {
+  final String jsonData;
+  final GoogleDriveBackupInfo info;
+
+  const GoogleDriveBackupSnapshot({required this.jsonData, required this.info});
+}
+
 // ============================================================
 // EXCEPTIONS
 // ============================================================
@@ -121,25 +128,64 @@ class GoogleDriveBackupService {
       );
 
       /*
-       * Try to restore an existing Google session silently.
+       * Normal app startup only initializes the SDK.
        *
-       * This does NOT show the Google account chooser.
-       * If no previous session exists, account simply stays null.
+       * Previous-session restoration is intentionally separated into
+       * restorePreviousSession(), so guest/Skip users never trigger Google
+       * authentication during startup.
        */
-      final lightweightAttempt = _googleSignIn
-          .attemptLightweightAuthentication();
-
-      if (lightweightAttempt != null) {
-        try {
-          _account = await lightweightAttempt;
-        } catch (_) {
-          _account = null;
-        }
-      }
-
+      _account = null;
       _initialized = true;
     } finally {
       _initializing = null;
+    }
+  }
+
+  // ==========================================================
+  // RESTORE PREVIOUS GOOGLE SESSION
+  // ==========================================================
+
+  Future<bool> restorePreviousSession() async {
+    await initialize();
+
+    if (_account != null) {
+      return true;
+    }
+
+    try {
+      final lightweightAttempt = _googleSignIn
+          .attemptLightweightAuthentication();
+
+      if (lightweightAttempt == null) {
+        _account = null;
+        return false;
+      }
+
+      _account = await lightweightAttempt;
+
+      final account = _account;
+
+      if (account == null) {
+        return false;
+      }
+
+      // The user already chose to connect Google previously.
+      // After restoring that account, make sure Drive scopes are usable.
+      try {
+        var authorization = await account.authorizationClient
+            .authorizationForScopes(GoogleAuthConfig.driveScopes);
+
+        authorization ??= await account.authorizationClient.authorizeScopes(
+          GoogleAuthConfig.driveScopes,
+        );
+      } catch (_) {
+        // Keep the restored account. Provider/controller can retry later.
+      }
+
+      return true;
+    } catch (_) {
+      _account = null;
+      return false;
     }
   }
 
@@ -375,6 +421,57 @@ class GoogleDriveBackupService {
 
       throw GoogleDriveBackupException(
         'Could not upload Watcher backup to Google Drive.',
+        cause: error,
+      );
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<GoogleDriveBackupSnapshot?> downloadBackupSnapshot() async {
+    final client = await _createAuthorizedClient();
+
+    try {
+      final driveApi = drive.DriveApi(client);
+      final file = await _findBackupFile(driveApi);
+      final fileId = file?.id;
+
+      if (file == null || fileId == null || fileId.isEmpty) {
+        return null;
+      }
+
+      final response = await driveApi.files.get(
+        fileId,
+        downloadOptions: drive.DownloadOptions.fullMedia,
+      );
+
+      if (response is! drive.Media) {
+        throw const GoogleDriveBackupException(
+          'Google Drive returned an invalid backup response.',
+        );
+      }
+
+      final bytes = <int>[];
+
+      await for (final chunk in response.stream) {
+        bytes.addAll(chunk);
+      }
+
+      if (bytes.isEmpty) {
+        throw const GoogleDriveBackupException('Cloud backup file is empty.');
+      }
+
+      return GoogleDriveBackupSnapshot(
+        jsonData: utf8.decode(bytes),
+        info: GoogleDriveBackupInfo.fromDriveFile(file),
+      );
+    } catch (error) {
+      if (error is GoogleDriveBackupException) {
+        rethrow;
+      }
+
+      throw GoogleDriveBackupException(
+        'Could not download Watcher backup from Google Drive.',
         cause: error,
       );
     } finally {

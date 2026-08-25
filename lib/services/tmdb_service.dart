@@ -36,6 +36,11 @@ class TmdbDiscoverItem {
   final double voteAverage;
   final String overview;
 
+  /// Extra metadata used only to diversify Discover results.
+  /// Existing UI/data flows do not depend on these fields.
+  final String originalLanguage;
+  final List<int> genreIds;
+
   TmdbDiscoverItem({
     required this.id,
     required this.title,
@@ -45,6 +50,8 @@ class TmdbDiscoverItem {
     required this.releaseDate,
     required this.voteAverage,
     required this.overview,
+    this.originalLanguage = '',
+    this.genreIds = const <int>[],
   });
 
   factory TmdbDiscoverItem.fromJson(
@@ -72,6 +79,13 @@ class TmdbDiscoverItem {
       releaseDate: date,
       voteAverage: (json['vote_average'] as num?)?.toDouble() ?? 0.0,
       overview: (json['overview'] ?? '').toString(),
+      originalLanguage: (json['original_language'] ?? '').toString(),
+      genreIds: (json['genre_ids'] is List)
+          ? (json['genre_ids'] as List)
+                .whereType<num>()
+                .map((value) => value.toInt())
+                .toList(growable: false)
+          : const <int>[],
     );
   }
 
@@ -106,6 +120,11 @@ class TmdbMediaData {
   final String? backdropUrl;
   final String? hdPosterUrl;
 
+  /// Original quality TMDB backdrop URLs.
+  ///
+  /// First item is usually the matched title's primary backdrop.
+  final List<String> backdropUrls;
+
   /// Original quality TMDB poster URLs.
   ///
   /// First item is usually the matched title's primary poster.
@@ -116,8 +135,71 @@ class TmdbMediaData {
   const TmdbMediaData({
     this.backdropUrl,
     this.hdPosterUrl,
+    this.backdropUrls = const <String>[],
     this.posterUrls = const <String>[],
   });
+}
+
+class TmdbPersonSummary {
+  final String id;
+  final String name;
+  final String knownForDepartment;
+  final String? profilePath;
+  final double popularity;
+
+  const TmdbPersonSummary({
+    required this.id,
+    required this.name,
+    required this.knownForDepartment,
+    this.profilePath,
+    required this.popularity,
+  });
+
+  String? get profileUrl {
+    final path = profilePath?.trim();
+
+    if (path == null || path.isEmpty) {
+      return null;
+    }
+
+    return 'https://image.tmdb.org/t/p/w500$path';
+  }
+}
+
+class TmdbPersonDetails {
+  final String id;
+  final String name;
+  final String knownForDepartment;
+  final String biography;
+  final String birthday;
+  final String deathday;
+  final String placeOfBirth;
+  final String? profilePath;
+  final double popularity;
+  final List<TmdbDiscoverItem> knownFor;
+
+  const TmdbPersonDetails({
+    required this.id,
+    required this.name,
+    required this.knownForDepartment,
+    required this.biography,
+    required this.birthday,
+    required this.deathday,
+    required this.placeOfBirth,
+    this.profilePath,
+    required this.popularity,
+    this.knownFor = const <TmdbDiscoverItem>[],
+  });
+
+  String? get profileUrl {
+    final path = profilePath?.trim();
+
+    if (path == null || path.isEmpty) {
+      return null;
+    }
+
+    return 'https://image.tmdb.org/t/p/h632$path';
+  }
 }
 
 class TmdbSeriesInfo {
@@ -212,6 +294,26 @@ class _TmdbSeasonProgressCacheEntry {
   });
 }
 
+class _TmdbRecommendationsCacheEntry {
+  final List<TmdbDiscoverItem> items;
+  final DateTime createdAt;
+
+  const _TmdbRecommendationsCacheEntry({
+    required this.items,
+    required this.createdAt,
+  });
+}
+
+class _TmdbPersonDetailsCacheEntry {
+  final TmdbPersonDetails details;
+  final DateTime createdAt;
+
+  const _TmdbPersonDetailsCacheEntry({
+    required this.details,
+    required this.createdAt,
+  });
+}
+
 class TmdbService {
   static const String _apiKey = '5331a80da5ce7a5845447038f4ae1c06';
 
@@ -225,7 +327,58 @@ class TmdbService {
 
   static const int _backgroundDecodeThreshold = 35000;
 
-  static const String _discoverLanguages = 'en|hi|ko|ta|te|ml|kn';
+  // ==========================================================
+  // DIVERSE DISCOVER ROTATION
+  // ==========================================================
+  //
+  // Page 1 stays broad/global.
+  // Later pages alternate between industry/language spotlights
+  // and genre spotlights. This keeps Discover globally useful
+  // without increasing the number of requests per loaded page.
+  //
+  // Upcoming date range remains unchanged at 90 days.
+  //
+  // ==========================================================
+
+  static const List<String> _industryLanguageRotation = <String>[
+    'en', // Hollywood / English-language
+    'hi', // Hindi / Bollywood
+    'bn', // Bengali
+    'ko', // Korean
+    'ja', // Japanese
+    'zh', // Chinese
+    'ta', // Tamil
+    'te', // Telugu
+    'ml', // Malayalam
+    'kn', // Kannada
+    'es', // Spanish
+    'fr', // French
+    'de', // German
+    'it', // Italian
+    'tr', // Turkish
+    'th', // Thai
+    'id', // Indonesian
+    'ar', // Arabic
+    'ur', // Urdu
+    'pt', // Portuguese
+  ];
+
+  static const List<int> _genreRotation = <int>[
+    28, // Action
+    18, // Drama
+    35, // Comedy
+    53, // Thriller
+    27, // Horror
+    10749, // Romance
+    80, // Crime
+    878, // Science Fiction
+    14, // Fantasy
+    16, // Animation
+    10751, // Family
+    99, // Documentary
+    9648, // Mystery
+    12, // Adventure
+  ];
 
   static final http.Client _client = http.Client();
 
@@ -263,6 +416,22 @@ class TmdbService {
 
   static final Map<String, Future<TmdbSeasonProgressInfo?>>
   _seasonProgressInFlight = <String, Future<TmdbSeasonProgressInfo?>>{};
+
+  static const Duration _recommendationsCacheLifetime = Duration(minutes: 30);
+
+  static final Map<String, _TmdbRecommendationsCacheEntry>
+  _recommendationsCache = <String, _TmdbRecommendationsCacheEntry>{};
+
+  static final Map<String, Future<List<TmdbDiscoverItem>>>
+  _recommendationsInFlight = <String, Future<List<TmdbDiscoverItem>>>{};
+
+  static const Duration _personCacheLifetime = Duration(hours: 6);
+
+  static final Map<String, _TmdbPersonDetailsCacheEntry> _personDetailsCache =
+      <String, _TmdbPersonDetailsCacheEntry>{};
+
+  static final Map<String, Future<TmdbPersonDetails?>> _personDetailsInFlight =
+      <String, Future<TmdbPersonDetails?>>{};
 
   static String _cacheKey(
     TmdbDiscoverSection section,
@@ -574,6 +743,37 @@ class TmdbService {
     );
   }
 
+  static ({String? language, int? genre, int sourcePage})
+  _discoverDiversityLane(int requestedPage) {
+    if (requestedPage <= 1) {
+      return (language: null, genre: null, sourcePage: 1);
+    }
+
+    final lanePosition = requestedPage - 2;
+
+    // Even lane positions: rotate industries/languages.
+    if (lanePosition.isEven) {
+      final sequence = lanePosition ~/ 2;
+
+      final language =
+          _industryLanguageRotation[sequence %
+              _industryLanguageRotation.length];
+
+      final sourcePage = 1 + (sequence ~/ _industryLanguageRotation.length);
+
+      return (language: language, genre: null, sourcePage: sourcePage);
+    }
+
+    // Odd lane positions: rotate genres.
+    final sequence = lanePosition ~/ 2;
+
+    final genre = _genreRotation[sequence % _genreRotation.length];
+
+    final sourcePage = 1 + (sequence ~/ _genreRotation.length);
+
+    return (language: null, genre: genre, sourcePage: sourcePage);
+  }
+
   static Future<TmdbPageResult> _fetchDateDiscoverPage({
     required TmdbDiscoverSection section,
     required TmdbMediaType mediaType,
@@ -596,14 +796,23 @@ class TmdbService {
 
     final media = _mediaPath(mediaType);
 
+    final diversityLane = _discoverDiversityLane(page);
+
     final parameters = <String, String>{
       'api_key': _apiKey,
-      'page': page.toString(),
+      'page': diversityLane.sourcePage.toString(),
       'language': 'en-US',
       'sort_by': 'popularity.desc',
       'include_adult': 'false',
-      'with_original_language': _discoverLanguages,
     };
+
+    if (diversityLane.language != null) {
+      parameters['with_original_language'] = diversityLane.language!;
+    }
+
+    if (diversityLane.genre != null) {
+      parameters['with_genres'] = diversityLane.genre!.toString();
+    }
 
     if (mediaType == TmdbMediaType.movie) {
       parameters['primary_release_date.gte'] = _formatDate(startDate);
@@ -658,11 +867,14 @@ class TmdbService {
 
     final totalPages = (data['total_pages'] as num?)?.toInt() ?? 1;
 
-    return TmdbPageResult(
-      items: uniqueItems,
-      page: page,
-      hasMore: page < totalPages,
-    );
+    final laneHasMore = diversityLane.sourcePage < totalPages;
+
+    // There are many independent language/genre lanes after page 1.
+    // Keep app pagination available while the current lane returns data.
+    final hasMore =
+        uniqueItems.isNotEmpty && (page == 1 || laneHasMore || page < 80);
+
+    return TmdbPageResult(items: uniqueItems, page: page, hasMore: hasMore);
   }
 
   static List<TmdbDiscoverItem> _removeDuplicates(
@@ -1345,11 +1557,512 @@ class TmdbService {
   }
 
   // ==========================================================
+  // PERSON SEARCH + DETAILS + CREDITS
+  // ==========================================================
+
+  static Future<TmdbPersonSummary?> searchPerson(
+    String name, {
+    String? departmentHint,
+  }) async {
+    final cleanName = name.trim();
+
+    if (cleanName.isEmpty || cleanName == 'N/A') {
+      return null;
+    }
+
+    try {
+      final url = Uri.parse('$_baseUrl/search/person').replace(
+        queryParameters: <String, String>{
+          'api_key': _apiKey,
+          'query': cleanName,
+          'include_adult': 'false',
+          'language': 'en-US',
+          'page': '1',
+        },
+      );
+
+      final data = await _getJson(url);
+      final rawResults = data['results'];
+
+      if (rawResults is! List || rawResults.isEmpty) {
+        return null;
+      }
+
+      final normalizedHint = departmentHint?.trim().toLowerCase() ?? '';
+      TmdbPersonSummary? fallback;
+
+      for (final raw in rawResults) {
+        if (raw is! Map) {
+          continue;
+        }
+
+        final map = Map<String, dynamic>.from(raw);
+        final id = map['id']?.toString().trim() ?? '';
+        final personName = map['name']?.toString().trim() ?? '';
+
+        if (id.isEmpty || personName.isEmpty) {
+          continue;
+        }
+
+        final department = map['known_for_department']?.toString().trim() ?? '';
+
+        final summary = TmdbPersonSummary(
+          id: id,
+          name: personName,
+          knownForDepartment: department,
+          profilePath: map['profile_path']?.toString(),
+          popularity: (map['popularity'] as num?)?.toDouble() ?? 0.0,
+        );
+
+        fallback ??= summary;
+
+        final exactName = personName.toLowerCase() == cleanName.toLowerCase();
+
+        final departmentMatches =
+            normalizedHint.isEmpty ||
+            department.toLowerCase().contains(normalizedHint) ||
+            (normalizedHint == 'director' &&
+                department.toLowerCase().contains('directing')) ||
+            (normalizedHint == 'actor' &&
+                department.toLowerCase().contains('acting'));
+
+        if (exactName && departmentMatches) {
+          return summary;
+        }
+      }
+
+      return fallback;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<TmdbPersonDetails?> fetchPersonDetails(
+    String personId, {
+    bool forceRefresh = false,
+  }) {
+    final cleanId = personId.trim();
+
+    if (cleanId.isEmpty) {
+      return Future<TmdbPersonDetails?>.value(null);
+    }
+
+    if (!forceRefresh) {
+      final cached = _personDetailsCache[cleanId];
+
+      if (cached != null &&
+          DateTime.now().difference(cached.createdAt) <= _personCacheLifetime) {
+        return Future<TmdbPersonDetails?>.value(cached.details);
+      }
+    }
+
+    final existing = _personDetailsInFlight[cleanId];
+
+    if (existing != null) {
+      return existing;
+    }
+
+    late final Future<TmdbPersonDetails?> request;
+
+    request = (() async {
+      try {
+        final detailsUrl = Uri.parse('$_baseUrl/person/$cleanId').replace(
+          queryParameters: const <String, String>{
+            'api_key': _apiKey,
+            'language': 'en-US',
+          },
+        );
+
+        final creditsUrl =
+            Uri.parse('$_baseUrl/person/$cleanId/combined_credits').replace(
+              queryParameters: const <String, String>{
+                'api_key': _apiKey,
+                'language': 'en-US',
+              },
+            );
+
+        final responses = await Future.wait<Map<String, dynamic>?>([
+          _getJson(
+            detailsUrl,
+          ).then<Map<String, dynamic>?>((value) => value, onError: (_) => null),
+          _getJson(
+            creditsUrl,
+          ).then<Map<String, dynamic>?>((value) => value, onError: (_) => null),
+        ]);
+
+        final detailsData = responses[0];
+
+        if (detailsData == null) {
+          return null;
+        }
+
+        final knownForDepartment =
+            detailsData['known_for_department']?.toString().trim() ?? '';
+
+        final credits = _parsePersonCredits(
+          responses[1],
+          knownForDepartment: knownForDepartment,
+          limit: 20,
+        );
+
+        final details = TmdbPersonDetails(
+          id: cleanId,
+          name: detailsData['name']?.toString().trim() ?? '',
+          knownForDepartment: knownForDepartment,
+          biography: detailsData['biography']?.toString().trim() ?? '',
+          birthday: detailsData['birthday']?.toString().trim() ?? '',
+          deathday: detailsData['deathday']?.toString().trim() ?? '',
+          placeOfBirth: detailsData['place_of_birth']?.toString().trim() ?? '',
+          profilePath: detailsData['profile_path']?.toString(),
+          popularity: (detailsData['popularity'] as num?)?.toDouble() ?? 0.0,
+          knownFor: List<TmdbDiscoverItem>.unmodifiable(credits),
+        );
+
+        _personDetailsCache[cleanId] = _TmdbPersonDetailsCacheEntry(
+          details: details,
+          createdAt: DateTime.now(),
+        );
+
+        return details;
+      } catch (_) {
+        return null;
+      } finally {
+        _personDetailsInFlight.remove(cleanId);
+      }
+    })();
+
+    _personDetailsInFlight[cleanId] = request;
+
+    return request;
+  }
+
+  static List<TmdbDiscoverItem> _parsePersonCredits(
+    Map<String, dynamic>? data, {
+    required String knownForDepartment,
+    int limit = 20,
+  }) {
+    if (data == null) {
+      return const <TmdbDiscoverItem>[];
+    }
+
+    final combined = <Map<String, dynamic>>[];
+
+    void addRaw(dynamic rawList, String source) {
+      if (rawList is! List) {
+        return;
+      }
+
+      for (final raw in rawList) {
+        if (raw is! Map) {
+          continue;
+        }
+
+        final map = Map<String, dynamic>.from(raw);
+
+        if (map['adult'] == true) {
+          continue;
+        }
+
+        final mediaType =
+            map['media_type']?.toString().trim().toLowerCase() ?? '';
+
+        if (mediaType != 'movie' && mediaType != 'tv') {
+          continue;
+        }
+
+        if (map['poster_path'] == null ||
+            map['poster_path'].toString().trim().isEmpty) {
+          continue;
+        }
+
+        map['_credit_source'] = source;
+        combined.add(map);
+      }
+    }
+
+    addRaw(data['cast'], 'cast');
+    addRaw(data['crew'], 'crew');
+
+    final department = knownForDepartment.toLowerCase();
+
+    combined.sort((a, b) {
+      int priority(Map<String, dynamic> item) {
+        final source = item['_credit_source']?.toString() ?? '';
+        final job = item['job']?.toString().toLowerCase() ?? '';
+
+        if (department.contains('acting')) {
+          return source == 'cast' ? 0 : 2;
+        }
+
+        if (department.contains('directing')) {
+          if (job == 'director') {
+            return 0;
+          }
+
+          return source == 'crew' ? 1 : 2;
+        }
+
+        return 1;
+      }
+
+      final p = priority(a).compareTo(priority(b));
+
+      if (p != 0) {
+        return p;
+      }
+
+      final bPopularity = (b['popularity'] as num?)?.toDouble() ?? 0.0;
+      final aPopularity = (a['popularity'] as num?)?.toDouble() ?? 0.0;
+
+      final popularityCompare = bPopularity.compareTo(aPopularity);
+
+      if (popularityCompare != 0) {
+        return popularityCompare;
+      }
+
+      final bVotes = (b['vote_count'] as num?)?.toInt() ?? 0;
+      final aVotes = (a['vote_count'] as num?)?.toInt() ?? 0;
+
+      return bVotes.compareTo(aVotes);
+    });
+
+    final unique = <String, TmdbDiscoverItem>{};
+
+    for (final map in combined) {
+      final mediaType =
+          map['media_type']?.toString().trim().toLowerCase() ?? '';
+
+      final item = TmdbDiscoverItem.fromJson(map, defaultType: mediaType);
+
+      if (item.id.trim().isEmpty || item.title.trim().isEmpty) {
+        continue;
+      }
+
+      unique[item.uniqueKey] = item;
+
+      if (unique.length >= limit) {
+        break;
+      }
+    }
+
+    return unique.values.toList(growable: false);
+  }
+
+  // ==========================================================
+  // SIMILAR + RECOMMENDED TITLES
+  // ==========================================================
+
+  static Future<List<TmdbDiscoverItem>> fetchSimilarAndRecommended({
+    required String showId,
+    required String title,
+    required String type,
+    int limit = 12,
+    bool forceRefresh = false,
+  }) {
+    final cleanId = showId.trim();
+    final cleanTitle = title.trim();
+    final isMovie = type.trim().toLowerCase().contains('movie');
+    final mediaPath = isMovie ? 'movie' : 'tv';
+    final safeLimit = limit.clamp(1, 20).toInt();
+
+    final cacheKey =
+        '${mediaPath}_${cleanId.isNotEmpty ? cleanId : cleanTitle.toLowerCase()}';
+
+    if (!forceRefresh) {
+      final cached = _recommendationsCache[cacheKey];
+
+      if (cached != null &&
+          DateTime.now().difference(cached.createdAt) <=
+              _recommendationsCacheLifetime) {
+        return Future<List<TmdbDiscoverItem>>.value(cached.items);
+      }
+    }
+
+    final existing = _recommendationsInFlight[cacheKey];
+
+    if (existing != null) {
+      return existing;
+    }
+
+    late final Future<List<TmdbDiscoverItem>> request;
+
+    request = (() async {
+      try {
+        final tmdbId = await _resolveTmdbIdForSavedTitle(
+          showId: cleanId,
+          title: cleanTitle,
+          mediaPath: mediaPath,
+        );
+
+        if (tmdbId == null || tmdbId.isEmpty) {
+          return const <TmdbDiscoverItem>[];
+        }
+
+        final recommendationUrl =
+            Uri.parse('$_baseUrl/$mediaPath/$tmdbId/recommendations').replace(
+              queryParameters: const <String, String>{
+                'api_key': _apiKey,
+                'language': 'en-US',
+                'page': '1',
+              },
+            );
+
+        final similarUrl = Uri.parse('$_baseUrl/$mediaPath/$tmdbId/similar')
+            .replace(
+              queryParameters: const <String, String>{
+                'api_key': _apiKey,
+                'language': 'en-US',
+                'page': '1',
+              },
+            );
+
+        final responses = await Future.wait<Map<String, dynamic>?>([
+          _getJson(
+            recommendationUrl,
+          ).then<Map<String, dynamic>?>((value) => value, onError: (_) => null),
+          _getJson(
+            similarUrl,
+          ).then<Map<String, dynamic>?>((value) => value, onError: (_) => null),
+        ]);
+
+        final combined = <TmdbDiscoverItem>[];
+
+        void addResults(Map<String, dynamic>? data) {
+          final rawResults = data?['results'];
+
+          if (rawResults is! List) {
+            return;
+          }
+
+          for (final raw in rawResults) {
+            if (raw is! Map) {
+              continue;
+            }
+
+            final map = Map<String, dynamic>.from(raw);
+
+            if (map['adult'] == true) {
+              continue;
+            }
+
+            final item = TmdbDiscoverItem.fromJson(map, defaultType: mediaPath);
+
+            if (item.id == tmdbId ||
+                item.title.trim().isEmpty ||
+                item.posterPath == null ||
+                item.posterPath!.trim().isEmpty) {
+              continue;
+            }
+
+            combined.add(item);
+          }
+        }
+
+        addResults(responses[0]);
+        addResults(responses[1]);
+
+        final unique = _removeDuplicates(
+          combined,
+        ).take(safeLimit).toList(growable: false);
+
+        final result = List<TmdbDiscoverItem>.unmodifiable(unique);
+
+        _recommendationsCache[cacheKey] = _TmdbRecommendationsCacheEntry(
+          items: result,
+          createdAt: DateTime.now(),
+        );
+
+        return result;
+      } catch (_) {
+        return const <TmdbDiscoverItem>[];
+      } finally {
+        _recommendationsInFlight.remove(cacheKey);
+      }
+    })();
+
+    _recommendationsInFlight[cacheKey] = request;
+    return request;
+  }
+
+  static Future<String?> _resolveTmdbIdForSavedTitle({
+    required String showId,
+    required String title,
+    required String mediaPath,
+  }) async {
+    if (mediaPath == 'tv' && showId.startsWith('tmdb_tv_')) {
+      final value = showId.substring('tmdb_tv_'.length).trim();
+      if (value.isNotEmpty) return value;
+    }
+
+    if (mediaPath == 'movie' && showId.startsWith('tmdb_movie_')) {
+      final value = showId.substring('tmdb_movie_'.length).trim();
+      if (value.isNotEmpty) return value;
+    }
+
+    if (showId.startsWith('tt')) {
+      try {
+        final url = Uri.parse('$_baseUrl/find/$showId').replace(
+          queryParameters: const <String, String>{
+            'api_key': _apiKey,
+            'external_source': 'imdb_id',
+            'language': 'en-US',
+          },
+        );
+
+        final data = await _getJson(url);
+        final rawResults = mediaPath == 'movie'
+            ? data['movie_results']
+            : data['tv_results'];
+
+        if (rawResults is List) {
+          for (final raw in rawResults) {
+            if (raw is! Map) continue;
+            final id = raw['id']?.toString().trim();
+            if (id != null && id.isNotEmpty) return id;
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (title.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      final endpoint = mediaPath == 'movie' ? 'search/movie' : 'search/tv';
+
+      final url = Uri.parse('$_baseUrl/$endpoint').replace(
+        queryParameters: <String, String>{
+          'api_key': _apiKey,
+          'query': title.trim(),
+          'include_adult': 'false',
+          'language': 'en-US',
+          'page': '1',
+        },
+      );
+
+      final data = await _getJson(url);
+      final rawResults = data['results'];
+
+      if (rawResults is List) {
+        for (final raw in rawResults) {
+          if (raw is! Map) continue;
+          final id = raw['id']?.toString().trim();
+          if (id != null && id.isNotEmpty) return id;
+        }
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  // ==========================================================
   // MEDIA DETAILS + POSTER GALLERY
   // ==========================================================
   //
   // Used by Details screen for:
   // - backdrop image
+  // - alternate TMDB backdrops for swipe gallery
   // - high-resolution primary poster
   // - alternate TMDB posters for swipe gallery
   //
@@ -1405,19 +2118,31 @@ class TmdbService {
 
       final backdropUrl = _tmdbImageUrl(backdropPath, size: 'w1280');
 
+      final hdBackdropUrl = _tmdbImageUrl(backdropPath, size: 'original');
+
       final hdPosterUrl = _tmdbImageUrl(posterPath, size: 'original');
 
+      final backdropUrls = <String>[];
       final posterUrls = <String>[];
 
+      _addUniquePosterUrl(backdropUrls, hdBackdropUrl);
       _addUniquePosterUrl(posterUrls, hdPosterUrl);
 
       if (tmdbId != null && tmdbId.trim().isNotEmpty) {
-        final fetchedPosters = await _fetchPosterUrlsForTmdbId(
+        final mediaImages = await _fetchMediaImageUrlsForTmdbId(
           tmdbId.trim(),
           mediaPath,
         );
 
-        for (final posterUrl in fetchedPosters) {
+        for (final backdrop in mediaImages.backdrops) {
+          _addUniquePosterUrl(backdropUrls, backdrop);
+
+          if (backdropUrls.length >= 10) {
+            break;
+          }
+        }
+
+        for (final posterUrl in mediaImages.posters) {
           _addUniquePosterUrl(posterUrls, posterUrl);
 
           if (posterUrls.length >= 12) {
@@ -1429,6 +2154,7 @@ class TmdbService {
       return TmdbMediaData(
         backdropUrl: backdropUrl,
         hdPosterUrl: hdPosterUrl,
+        backdropUrls: List<String>.unmodifiable(backdropUrls),
         posterUrls: List<String>.unmodifiable(posterUrls),
       );
     } catch (_) {
@@ -1436,10 +2162,8 @@ class TmdbService {
     }
   }
 
-  static Future<List<String>> _fetchPosterUrlsForTmdbId(
-    String tmdbId,
-    String mediaPath,
-  ) async {
+  static Future<({List<String> backdrops, List<String> posters})>
+  _fetchMediaImageUrlsForTmdbId(String tmdbId, String mediaPath) async {
     try {
       final url = Uri.parse('$_baseUrl/$mediaPath/$tmdbId/images').replace(
         queryParameters: const <String, String>{
@@ -1450,52 +2174,69 @@ class TmdbService {
 
       final data = await _getJson(url);
 
-      final rawPosters = data['posters'];
-
-      if (rawPosters is! List || rawPosters.isEmpty) {
-        return const <String>[];
-      }
-
-      final posters = rawPosters
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
-
-      posters.sort((a, b) {
-        final bVote = (b['vote_average'] as num?)?.toDouble() ?? 0.0;
-
-        final aVote = (a['vote_average'] as num?)?.toDouble() ?? 0.0;
-
-        final voteCompare = bVote.compareTo(aVote);
-
-        if (voteCompare != 0) {
-          return voteCompare;
+      List<Map<String, dynamic>> normalizeImages(dynamic rawImages) {
+        if (rawImages is! List || rawImages.isEmpty) {
+          return <Map<String, dynamic>>[];
         }
 
-        final bCount = (b['vote_count'] as num?)?.toInt() ?? 0;
+        final images = rawImages
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
 
-        final aCount = (a['vote_count'] as num?)?.toInt() ?? 0;
+        images.sort((a, b) {
+          final bVote = (b['vote_average'] as num?)?.toDouble() ?? 0.0;
+          final aVote = (a['vote_average'] as num?)?.toDouble() ?? 0.0;
 
-        return bCount.compareTo(aCount);
-      });
+          final voteCompare = bVote.compareTo(aVote);
 
-      final urls = <String>[];
+          if (voteCompare != 0) {
+            return voteCompare;
+          }
 
-      for (final poster in posters) {
-        final filePath = poster['file_path']?.toString();
+          final bCount = (b['vote_count'] as num?)?.toInt() ?? 0;
+          final aCount = (a['vote_count'] as num?)?.toInt() ?? 0;
 
-        final posterUrl = _tmdbImageUrl(filePath, size: 'original');
+          return bCount.compareTo(aCount);
+        });
 
-        _addUniquePosterUrl(urls, posterUrl);
+        return images;
+      }
 
-        if (urls.length >= 12) {
+      final backdropMaps = normalizeImages(data['backdrops']);
+      final posterMaps = normalizeImages(data['posters']);
+
+      final backdropUrls = <String>[];
+      final posterUrls = <String>[];
+
+      for (final backdrop in backdropMaps) {
+        final filePath = backdrop['file_path']?.toString();
+        final imageUrl = _tmdbImageUrl(filePath, size: 'original');
+
+        _addUniquePosterUrl(backdropUrls, imageUrl);
+
+        if (backdropUrls.length >= 10) {
           break;
         }
       }
 
-      return List<String>.unmodifiable(urls);
+      for (final poster in posterMaps) {
+        final filePath = poster['file_path']?.toString();
+        final imageUrl = _tmdbImageUrl(filePath, size: 'original');
+
+        _addUniquePosterUrl(posterUrls, imageUrl);
+
+        if (posterUrls.length >= 12) {
+          break;
+        }
+      }
+
+      return (
+        backdrops: List<String>.unmodifiable(backdropUrls),
+        posters: List<String>.unmodifiable(posterUrls),
+      );
     } catch (_) {
-      return const <String>[];
+      return (backdrops: const <String>[], posters: const <String>[]);
     }
   }
 
@@ -1521,6 +2262,65 @@ class TmdbService {
     } catch (_) {
       return null;
     }
+  }
+
+  // ==========================================================
+  // SEARCH MOVIES + SERIES
+  // ==========================================================
+
+  static Future<List<TmdbDiscoverItem>> searchTitles(
+    String query, {
+    int page = 1,
+  }) async {
+    final cleanQuery = query.trim();
+
+    if (cleanQuery.length < 2) {
+      return const <TmdbDiscoverItem>[];
+    }
+
+    final safePage = page < 1 ? 1 : page;
+
+    final url = Uri.parse('$_baseUrl/search/multi').replace(
+      queryParameters: <String, String>{
+        'api_key': _apiKey,
+        'query': cleanQuery,
+        'page': safePage.toString(),
+        'include_adult': 'false',
+        'language': 'en-US',
+      },
+    );
+
+    final data = await _getJson(url);
+    final rawResults = data['results'];
+
+    if (rawResults is! List) {
+      return const <TmdbDiscoverItem>[];
+    }
+
+    final items = <TmdbDiscoverItem>[];
+
+    for (final raw in rawResults) {
+      if (raw is! Map) {
+        continue;
+      }
+
+      final map = Map<String, dynamic>.from(raw);
+      final mediaType = map['media_type']?.toString().trim().toLowerCase();
+
+      if (mediaType != 'movie' && mediaType != 'tv') {
+        continue;
+      }
+
+      final item = TmdbDiscoverItem.fromJson(map);
+
+      if (item.title.trim().isEmpty || item.id.trim().isEmpty) {
+        continue;
+      }
+
+      items.add(item);
+    }
+
+    return _removeDuplicates(items);
   }
 
   static Future<List<TmdbDiscoverItem>> fetchTrending({
