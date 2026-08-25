@@ -21,9 +21,19 @@ synced with backup support.
 
 Get the latest Android build from GitHub Releases.
 
-[⬇️ Download Latest Version](../../releases/latest)+
+[⬇️ Download Latest Version](../../releases/latest)
 
 ---
+
+## 📱 Screenshots
+
+<p align="center">
+<img src="screenshots/Home.png" width="250">
+<img src="screenshots/Details.png" width="250">
+<img src="screenshots/Discover.png" width="250">
+<img src="screenshots/Stats.png" width="250">
+<img src="screenshots/Settings.png" width="250">
+</p>
 
 ## 🚀 Features
 
