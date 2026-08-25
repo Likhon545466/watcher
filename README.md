@@ -14,7 +14,14 @@
 
 Watcher is a personal movie and series management app built with Flutter.
 
-It helps you discover new titles, organize your watchlist, track episode progress, and keep your collection synced with backup support.
+It helps you discover new titles, organize your watchlist, track episode progress, and keep your collection
+synced with backup support.
+
+## 📥 Download Latest APK
+
+Get the latest Android build from GitHub Releases.
+
+[⬇️ Download Latest Version](../../releases/latest)+
 
 ---
 

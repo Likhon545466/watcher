@@ -1,38 +1,80 @@
-name: Build Flutter APK
+name: Build Watcher APK
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
+
+  workflow_dispatch:
 
 jobs:
   build:
+    name: Build Release APK
     runs-on: ubuntu-latest
 
     steps:
+      # Checkout source
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      # Setup Java
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: "zulu"
+          distribution: zulu
           java-version: "17"
 
-      - name: Set up Flutter
+      # Setup Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.8"
-          channel: "stable"
+          channel: stable
           cache: true
 
-      - name: Install dependencies
+      # Install packages
+      - name: Flutter Pub Get
         run: flutter pub get
 
-      - name: Build Release APK
-        run: flutter build apk --release --verbose
+      # Read version
+      - name: Read App Version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+          NAME=${VERSION%%+*}
+          BUILD=${VERSION##*+}
 
+          echo "version_name=$NAME" >> $GITHUB_OUTPUT
+          echo "build_number=$BUILD" >> $GITHUB_OUTPUT
+
+      # Build APK
+      - name: Build Release APK
+        run: flutter build apk --release
+
+      # Rename APK
+      - name: Rename APK
+        shell: bash
+        run: |
+          mkdir -p release
+
+          cp build/app/outputs/flutter-apk/app-release.apk \
+          release/Watcher-v${{ steps.version.outputs.version_name }}-build${{ steps.version.outputs.build_number }}.apk
+
+      # Upload artifact
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: Watcher-v${{ steps.version.outputs.version_name }}-build${{ steps.version.outputs.build_number }}
+          path: release/*.apk
+
+      # Create GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.build_number }}
+          name: Watcher v${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.build_number }}
+          files: |
+            release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
