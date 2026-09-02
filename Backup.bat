@@ -40,8 +40,7 @@ set BACKUP_NAME=backup\watcher_lib_backup_%DATE%_%TIME%_%RANDOM%.zip
 echo Creating Watcher lib backup...
 echo.
 
-powershell -NoProfile -Command "Compress-Archive -Path '.\lib\*' -DestinationPath '%BACKUP_NAME%' -Force"
-
+,powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '.\lib\*' -DestinationPath '%BACKUP_NAME%' -Force"
 if exist "%BACKUP_NAME%" (
     echo.
     echo ==========================
