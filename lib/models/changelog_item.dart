@@ -41,6 +41,31 @@ class ChangelogData {
     // =========================================================
     ChangelogItem(
       version: 'AUTO',
+      date: '03 Sep 2026',
+      newFeatures: [
+        'Added Trailers & Official Videos carousel in Show Details with direct YouTube playback support.',
+        'Added comprehensive Season & Episode Guide bottom sheet with episode stills, air dates, overviews, guest stars, and direct watch marking.',
+        'Added Release Calendar to track upcoming movie premieres and TV episode air dates for titles in your watchlist.',
+        'Added Advanced Statistics & Analytics with watch time breakdown (days/hours/minutes), genre breakdown, release year analysis, and completion rates.',
+        'Added Custom Tags support for categorizing and filtering library titles.',
+        'Added Movie Release Reminders and customizable notification schedules for upcoming episodes and movies.',
+        'Added Home Widget integration support for quick glance at upcoming episodes.',
+      ],
+      improvements: [
+        'Overhauled Show Details UI with expandable synopsis, cast & crew chips, and integrated media sections.',
+        'Improved Notification Service with scheduled notification permissions and exact alarms on Android.',
+        'Enhanced TMDB Service with episode detail and video fetching with smart caching.',
+        'Optimized library provider with fast tag filtering, watch-time calculation, and calendar querying.',
+        'Updated build automation and release artifact packaging in build.bat.',
+      ],
+      bugFixes: [
+        'Fixed notification scheduling issues on newer Android versions.',
+        'Fixed episode progress state synchronization across detail views and stats.',
+        'Fixed memory overhead during image caching of episode stills and backdrops.',
+      ],
+    ),
+    ChangelogItem(
+      version: '4.1.6',
       date: '13 Aug 2026',
       newFeatures: [
         'Added Similar & Recommended titles to the Details screen using TMDB recommendations and similar results.',

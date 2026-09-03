@@ -71,6 +71,13 @@ class Show {
   final int? reminderEpisode;
   final DateTime? reminderAirDate;
 
+  // ==========================================================
+  // CUSTOM TAGS & MOVIE PREMIERE REMINDER
+  // ==========================================================
+  final List<String> customTags;
+  final bool movieReminderEnabled;
+  final DateTime? movieReleaseDate;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -109,6 +116,9 @@ class Show {
     this.reminderSeason,
     this.reminderEpisode,
     this.reminderAirDate,
+    this.customTags = const <String>[],
+    this.movieReminderEnabled = false,
+    this.movieReleaseDate,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -343,6 +353,9 @@ class Show {
       reminderSeason: null,
       reminderEpisode: null,
       reminderAirDate: null,
+      customTags: const <String>[],
+      movieReminderEnabled: false,
+      movieReleaseDate: null,
       createdAt: now,
       updatedAt: now,
     );
@@ -392,6 +405,9 @@ class Show {
       reminderSeason: null,
       reminderEpisode: null,
       reminderAirDate: null,
+      customTags: const <String>[],
+      movieReminderEnabled: false,
+      movieReleaseDate: null,
       createdAt: now,
       updatedAt: now,
     );
@@ -489,6 +505,17 @@ class Show {
         json['reminderAirDate']?.toString() ?? '',
       ),
 
+      customTags: _stringList(json['customTags']),
+
+      movieReminderEnabled: _toBool(
+        json['movieReminderEnabled'],
+        fallback: false,
+      ),
+
+      movieReleaseDate: DateTime.tryParse(
+        json['movieReleaseDate']?.toString() ?? '',
+      ),
+
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ?? now,
 
       updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? now,
@@ -566,6 +593,12 @@ class Show {
 
       'reminderAirDate': reminderAirDate?.toIso8601String(),
 
+      'customTags': customTags,
+
+      'movieReminderEnabled': movieReminderEnabled,
+
+      'movieReleaseDate': movieReleaseDate?.toIso8601String(),
+
       'createdAt': createdAt.toIso8601String(),
 
       'updatedAt': updatedAt.toIso8601String(),
@@ -617,6 +650,10 @@ class Show {
     Object? reminderSeason = _unset,
     Object? reminderEpisode = _unset,
     Object? reminderAirDate = _unset,
+
+    List<String>? customTags,
+    bool? movieReminderEnabled,
+    Object? movieReleaseDate = _unset,
 
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -683,6 +720,15 @@ class Show {
       reminderAirDate: identical(reminderAirDate, _unset)
           ? this.reminderAirDate
           : reminderAirDate as DateTime?,
+
+      customTags: customTags ?? this.customTags,
+
+      movieReminderEnabled:
+          movieReminderEnabled ?? this.movieReminderEnabled,
+
+      movieReleaseDate: identical(movieReleaseDate, _unset)
+          ? this.movieReleaseDate
+          : movieReleaseDate as DateTime?,
 
       createdAt: createdAt ?? this.createdAt,
 
@@ -839,5 +885,17 @@ class Show {
     });
 
     return result;
+  }
+
+  static List<String> _stringList(dynamic value) {
+    if (value is! List) {
+      return const <String>[];
+    }
+
+    return value
+        .map((item) => item?.toString().trim() ?? '')
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
   }
 }

@@ -31,7 +31,7 @@ class NotificationService {
   static String? get pendingPayload => _pendingPayload;
 
   // ==========================================================
-  // CHANNEL
+  // CHANNELS
   // ==========================================================
 
   static const String episodeChannelId = 'watcher_episode_reminders';
@@ -40,6 +40,13 @@ class NotificationService {
 
   static const String episodeChannelDescription =
       'Notifications for upcoming series episodes';
+
+  static const String movieChannelId = 'watcher_movie_reminders';
+
+  static const String movieChannelName = 'Movie Premiere Reminders';
+
+  static const String movieChannelDescription =
+      'Notifications for upcoming movie releases and premieres';
 
   // ==========================================================
   // REMINDER TIME
@@ -203,7 +210,7 @@ class NotificationService {
       return;
     }
 
-    const channel = AndroidNotificationChannel(
+    const episodeChannel = AndroidNotificationChannel(
       episodeChannelId,
       episodeChannelName,
       description: episodeChannelDescription,
@@ -213,7 +220,18 @@ class NotificationService {
       showBadge: true,
     );
 
-    await androidPlugin.createNotificationChannel(channel);
+    const movieChannel = AndroidNotificationChannel(
+      movieChannelId,
+      movieChannelName,
+      description: movieChannelDescription,
+      importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
+      showBadge: true,
+    );
+
+    await androidPlugin.createNotificationChannel(episodeChannel);
+    await androidPlugin.createNotificationChannel(movieChannel);
   }
 
   // ==========================================================
@@ -504,6 +522,112 @@ class NotificationService {
   }
 
   // ==========================================================
+  // SCHEDULE MOVIE PREMIERE REMINDER
+  // ==========================================================
+
+  static Future<bool> scheduleMovieReminder({
+    required String showId,
+    required String showTitle,
+    required DateTime releaseDate,
+  }) async {
+    if (showId.trim().isEmpty || showTitle.trim().isEmpty) {
+      return false;
+    }
+
+    try {
+      await initialize();
+
+      if (!_initialized) {
+        return false;
+      }
+
+      final scheduledDate = tz.TZDateTime(
+        tz.local,
+        releaseDate.year,
+        releaseDate.month,
+        releaseDate.day,
+        reminderHour,
+        reminderMinute,
+      );
+
+      final now = tz.TZDateTime.now(tz.local);
+
+      if (!scheduledDate.isAfter(now)) {
+        return false;
+      }
+
+      final notificationId = movieNotificationIdForShow(showId);
+
+      final payload = jsonEncode(<String, dynamic>{
+        'type': 'movie_reminder',
+        'showId': showId,
+      });
+
+      final title = 'Movie Premiere Today!';
+      final body = '$showTitle officially releases today.';
+
+      const androidDetails = AndroidNotificationDetails(
+        movieChannelId,
+        movieChannelName,
+        channelDescription: movieChannelDescription,
+        icon: 'ic_watcher_notification',
+        importance: Importance.high,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+        autoCancel: true,
+        onlyAlertOnce: true,
+        category: AndroidNotificationCategory.reminder,
+        visibility: NotificationVisibility.public,
+      );
+
+      const darwinDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      );
+
+      const notificationDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: darwinDetails,
+        macOS: darwinDetails,
+      );
+
+      await _plugin.cancel(id: notificationId);
+
+      await _plugin.zonedSchedule(
+        id: notificationId,
+        title: title,
+        body: body,
+        scheduledDate: scheduledDate,
+        notificationDetails: notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        payload: payload,
+      );
+
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> cancelMovieReminder(String showId) async {
+    if (showId.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      await initialize();
+
+      if (!_initialized) {
+        return;
+      }
+
+      await _plugin.cancel(id: movieNotificationIdForShow(showId));
+    } catch (_) {}
+  }
+
+  // ==========================================================
   // STABLE NOTIFICATION ID
   // ==========================================================
 
@@ -521,5 +645,21 @@ class NotificationService {
     final positive = hash & 0x7FFFFFFF;
 
     return positive == 0 ? 1 : positive;
+  }
+
+  static int movieNotificationIdForShow(String showId) {
+    final input = 'watcher_movie_$showId';
+
+    int hash = 0x811C9DC5;
+
+    for (final unit in input.codeUnits) {
+      hash ^= unit;
+
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+
+    final positive = hash & 0x7FFFFFFF;
+
+    return positive == 0 ? 2 : positive;
   }
 }

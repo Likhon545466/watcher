@@ -4,6 +4,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../models/tmdb_episode_detail.dart';
+import '../models/tmdb_video.dart';
+
 Map<String, dynamic>? _decodeTmdbBody(String body) {
   try {
     final decoded = jsonDecode(body);
@@ -432,6 +435,22 @@ class TmdbService {
 
   static final Map<String, Future<TmdbPersonDetails?>> _personDetailsInFlight =
       <String, Future<TmdbPersonDetails?>>{};
+
+  static const Duration _videosCacheLifetime = Duration(hours: 2);
+  static final Map<String, ({List<TmdbVideo> videos, DateTime createdAt})>
+  _videosCache = <String, ({List<TmdbVideo> videos, DateTime createdAt})>{};
+  static final Map<String, Future<List<TmdbVideo>>> _videosInFlight =
+      <String, Future<List<TmdbVideo>>>{};
+
+  static const Duration _seasonEpisodesCacheLifetime = Duration(hours: 2);
+  static final Map<
+    String,
+    ({List<TmdbEpisodeDetail> episodes, DateTime createdAt})
+  >
+  _seasonEpisodesCache =
+      <String, ({List<TmdbEpisodeDetail> episodes, DateTime createdAt})>{};
+  static final Map<String, Future<List<TmdbEpisodeDetail>>>
+  _seasonEpisodesInFlight = <String, Future<List<TmdbEpisodeDetail>>>{};
 
   static String _cacheKey(
     TmdbDiscoverSection section,
@@ -2412,5 +2431,188 @@ class TmdbService {
     } catch (_) {
       return <TmdbDiscoverItem>[];
     }
+  }
+
+  // ==========================================================
+  // VIDEOS / TRAILERS / TEASERS
+  // ==========================================================
+
+  static Future<List<TmdbVideo>> fetchVideos({
+    required String showId,
+    required String title,
+    required String type,
+    bool forceRefresh = false,
+  }) {
+    final cleanId = showId.trim();
+    final cleanTitle = title.trim();
+    final isMovie = type.trim().toLowerCase().contains('movie');
+    final mediaPath = isMovie ? 'movie' : 'tv';
+
+    final cacheKey =
+        '${mediaPath}_${cleanId.isNotEmpty ? cleanId : cleanTitle.toLowerCase()}';
+
+    if (!forceRefresh) {
+      final cached = _videosCache[cacheKey];
+      if (cached != null &&
+          DateTime.now().difference(cached.createdAt) <= _videosCacheLifetime) {
+        return Future<List<TmdbVideo>>.value(cached.videos);
+      }
+    }
+
+    final existing = _videosInFlight[cacheKey];
+    if (existing != null) {
+      return existing;
+    }
+
+    late final Future<List<TmdbVideo>> request;
+
+    request = (() async {
+      try {
+        final tmdbId = await _resolveTmdbIdForSavedTitle(
+          showId: cleanId,
+          title: cleanTitle,
+          mediaPath: mediaPath,
+        );
+
+        if (tmdbId == null || tmdbId.isEmpty) {
+          return const <TmdbVideo>[];
+        }
+
+        final url = Uri.parse('$_baseUrl/$mediaPath/$tmdbId/videos').replace(
+          queryParameters: const <String, String>{
+            'api_key': _apiKey,
+            'language': 'en-US',
+          },
+        );
+
+        final data = await _getJson(url);
+        final rawResults = data['results'];
+        final videos = <TmdbVideo>[];
+
+        if (rawResults is List) {
+          for (final raw in rawResults) {
+            if (raw is! Map) continue;
+            final video = TmdbVideo.fromJson(Map<String, dynamic>.from(raw));
+            if (video.isYouTube) {
+              videos.add(video);
+            }
+          }
+        }
+
+        // Sort: Official Trailers > Trailers > Teasers > Clips > Others
+        videos.sort((a, b) {
+          int score(TmdbVideo v) {
+            final t = v.type.toLowerCase();
+            if (t == 'trailer' && v.official) return 0;
+            if (t == 'trailer') return 1;
+            if (t == 'teaser' && v.official) return 2;
+            if (t == 'teaser') return 3;
+            if (t == 'clip') return 4;
+            return 5;
+          }
+
+          final sA = score(a);
+          final sB = score(b);
+          if (sA != sB) return sA.compareTo(sB);
+
+          final pubA = a.publishedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final pubB = b.publishedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return pubB.compareTo(pubA);
+        });
+
+        final result = List<TmdbVideo>.unmodifiable(videos);
+        _videosCache[cacheKey] = (videos: result, createdAt: DateTime.now());
+        return result;
+      } catch (_) {
+        return const <TmdbVideo>[];
+      } finally {
+        _videosInFlight.remove(cacheKey);
+      }
+    })();
+
+    _videosInFlight[cacheKey] = request;
+    return request;
+  }
+
+  // ==========================================================
+  // SEASON EPISODE DETAILS
+  // ==========================================================
+
+  static Future<List<TmdbEpisodeDetail>> fetchSeasonEpisodeDetails({
+    required String showId,
+    required String title,
+    required int seasonNumber,
+    bool forceRefresh = false,
+  }) {
+    final cleanId = showId.trim();
+    final cleanTitle = title.trim();
+    final cacheKey =
+        'tv_season_${cleanId.isNotEmpty ? cleanId : cleanTitle.toLowerCase()}_$seasonNumber';
+
+    if (!forceRefresh) {
+      final cached = _seasonEpisodesCache[cacheKey];
+      if (cached != null &&
+          DateTime.now().difference(cached.createdAt) <=
+              _seasonEpisodesCacheLifetime) {
+        return Future<List<TmdbEpisodeDetail>>.value(cached.episodes);
+      }
+    }
+
+    final existing = _seasonEpisodesInFlight[cacheKey];
+    if (existing != null) {
+      return existing;
+    }
+
+    late final Future<List<TmdbEpisodeDetail>> request;
+
+    request = (() async {
+      try {
+        final tmdbId = await _resolveTmdbIdForSavedTitle(
+          showId: cleanId,
+          title: cleanTitle,
+          mediaPath: 'tv',
+        );
+
+        if (tmdbId == null || tmdbId.isEmpty) {
+          return const <TmdbEpisodeDetail>[];
+        }
+
+        final url =
+            Uri.parse('$_baseUrl/tv/$tmdbId/season/$seasonNumber').replace(
+              queryParameters: const <String, String>{
+                'api_key': _apiKey,
+                'language': 'en-US',
+              },
+            );
+
+        final data = await _getJson(url);
+        final rawEpisodes = data['episodes'];
+        final episodes = <TmdbEpisodeDetail>[];
+
+        if (rawEpisodes is List) {
+          for (final raw in rawEpisodes) {
+            if (raw is! Map) continue;
+            episodes.add(
+              TmdbEpisodeDetail.fromJson(Map<String, dynamic>.from(raw)),
+            );
+          }
+        }
+
+        episodes.sort((a, b) => a.episodeNumber.compareTo(b.episodeNumber));
+        final result = List<TmdbEpisodeDetail>.unmodifiable(episodes);
+        _seasonEpisodesCache[cacheKey] = (
+          episodes: result,
+          createdAt: DateTime.now(),
+        );
+        return result;
+      } catch (_) {
+        return const <TmdbEpisodeDetail>[];
+      } finally {
+        _seasonEpisodesInFlight.remove(cacheKey);
+      }
+    })();
+
+    _seasonEpisodesInFlight[cacheKey] = request;
+    return request;
   }
 }

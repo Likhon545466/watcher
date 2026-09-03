@@ -14,6 +14,7 @@ import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/stats_screen.dart';
 import 'services/cloud_auto_backup_controller.dart';
+import 'services/home_widget_service.dart';
 import 'services/notification_service.dart';
 import 'services/tmdb_service.dart';
 import 'theme/app_theme.dart';
@@ -25,6 +26,11 @@ import 'widgets/ambient_background.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    debugPrint('FlutterError: ${details.exceptionAsString()}');
+  };
 
   unawaited(_enableHighRefreshRate());
 
@@ -51,7 +57,12 @@ void main() {
     ),
   );
 
-  unawaited(NotificationService.initialize());
+  unawaited(NotificationService.initialize().catchError((e) {
+    debugPrint('NotificationService init error: $e');
+  }));
+  unawaited(HomeWidgetService.initialize().catchError((e) {
+    debugPrint('HomeWidgetService init error: $e');
+  }));
 }
 
 // ============================================================

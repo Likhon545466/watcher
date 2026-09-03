@@ -17,6 +17,7 @@ REM - no flutter analyze
 REM - no flutter pub get
 REM - no Dart/source changes
 REM - version is stored in .watcher_version
+REM - builds saved to Release/ folder (keeping latest 2 builds)
 REM - Flutter gets version through:
 REM     --build-name
 REM     --build-number
@@ -170,8 +171,8 @@ REM ------------------------------------------------------------
 REM FIND FLUTTER APK
 REM ------------------------------------------------------------
 
-set "OUTPUT_DIR=build\app\outputs\flutter-apk"
-set "SOURCE_APK=!OUTPUT_DIR!\app-release.apk"
+set "SOURCE_OUTPUT_DIR=build\app\outputs\flutter-apk"
+set "SOURCE_APK=!SOURCE_OUTPUT_DIR!\app-release.apk"
 
 if not exist "!SOURCE_APK!" (
     echo.
@@ -187,13 +188,22 @@ if not exist "!SOURCE_APK!" (
 )
 
 REM ------------------------------------------------------------
-REM FINAL APK NAME
+REM ENSURE RELEASE DIRECTORY EXISTS
+REM ------------------------------------------------------------
+
+set "RELEASE_DIR=Release"
+if not exist "!RELEASE_DIR!" (
+    mkdir "!RELEASE_DIR!"
+)
+
+REM ------------------------------------------------------------
+REM FINAL APK NAME AND PLACEMENT IN RELEASE FOLDER
 REM Example:
-REM Watcher-v4.1.1-build5.apk
+REM Release\Watcher-v4.1.8-build12.apk
 REM ------------------------------------------------------------
 
 set "FINAL_NAME=Watcher-v!NEW_VERSION_NAME!-build!NEW_BUILD_NUMBER!.apk"
-set "FINAL_APK=!OUTPUT_DIR!\!FINAL_NAME!"
+set "FINAL_APK=!RELEASE_DIR!\!FINAL_NAME!"
 
 if exist "!FINAL_APK!" (
     del /Q "!FINAL_APK!" >nul 2>nul
@@ -204,16 +214,27 @@ move /Y "!SOURCE_APK!" "!FINAL_APK!" >nul
 if errorlevel 1 (
     echo.
     echo ============================================================
-    echo                     RENAME FAILED
+    echo                     MOVE / RENAME FAILED
     echo ============================================================
     echo.
     echo APK was built successfully,
-    echo but final rename failed.
+    echo but moving to !RELEASE_DIR! folder failed.
     echo.
     echo Version was NOT advanced.
     echo.
     pause
     exit /b 1
+)
+
+REM ------------------------------------------------------------
+REM RETAIN ONLY LATEST 2 BUILDS IN RELEASE FOLDER
+REM ------------------------------------------------------------
+
+echo.
+echo Cleaning older builds in !RELEASE_DIR!...
+for /f "skip=2 eol=: delims=" %%F in ('dir /b /a-d /o-d "!RELEASE_DIR!\Watcher-*.apk" 2^>nul') do (
+    echo Deleting older local build: %%F
+    del /Q "!RELEASE_DIR!\%%F" >nul 2>nul
 )
 
 REM ------------------------------------------------------------
@@ -232,15 +253,17 @@ echo Version      : v!NEW_VERSION_NAME!
 echo Build Number : !NEW_BUILD_NUMBER!
 echo Full Version : !NEW_FULL_VERSION!
 echo.
-echo APK Name:
-echo !FINAL_NAME!
-echo.
-echo Folder:
-echo !OUTPUT_DIR!
+echo Output APK   : !FINAL_NAME!
+echo Output Path  : !FINAL_APK!
 echo.
 echo Saved version:
 echo %VERSION_FILE% = !NEW_FULL_VERSION!
 echo.
+echo Local builds retained in !RELEASE_DIR! (max 2):
+dir /b /a-d /o-d "!RELEASE_DIR!\Watcher-*.apk" 2>nul
+echo.
+echo [NOTE] The build is stored locally for testing.
+echo It will NOT be pushed to GitHub without explicit permission.
 echo ============================================================
 echo.
 

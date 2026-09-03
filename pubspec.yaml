@@ -2,7 +2,7 @@ name: watcher
 description: A clean offline-first movie and series tracker powered by OMDb and TMDB.
 publish_to: "none"
 
-version: 4.1.0+4
+version: 4.2.7+21
 
 environment:
   sdk: ">=3.10.0 <4.0.0"
@@ -30,6 +30,7 @@ dependencies:
   googleapis: ^16.0.0
   extension_google_sign_in_as_googleapis_auth: ^3.0.0
   gal: ^2.3.3
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

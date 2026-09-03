@@ -14,6 +14,7 @@ import '../widgets/glass_container.dart';
 import '../widgets/poster_image.dart';
 import '../widgets/round_step_button.dart';
 import 'add_edit_show_screen.dart';
+import 'release_calendar_screen.dart';
 import 'show_detail_screen.dart';
 
 enum SortOption { dateAdded, rating, title, year }
@@ -841,8 +842,14 @@ class HomeScreenState extends State<HomeScreen> {
   // SORT
   // ==========================================================
 
-  List<Show> _processShows(List<Show> input) {
+  List<Show> _processShows(List<Show> input, [String? selectedTag]) {
     var filtered = input;
+
+    if (selectedTag != null && selectedTag.isNotEmpty) {
+      filtered = filtered
+          .where((show) => show.customTags.contains(selectedTag))
+          .toList();
+    }
 
     if (_typeFilter == TypeFilter.movies) {
       filtered = filtered.where((show) => !show.isSeries).toList();
@@ -896,6 +903,7 @@ class HomeScreenState extends State<HomeScreen> {
     context.select<ShowProvider, String>(
       (provider) =>
           '${provider.loading}|'
+          '${provider.selectedTag ?? ""}|'
           '${provider.allShows.map((show) => show.hashCode).join(',')}',
     );
 
@@ -942,13 +950,28 @@ class HomeScreenState extends State<HomeScreen> {
                       letterSpacing: -0.5,
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'Sort & Filter',
-                    icon: Icon(
-                      Icons.tune_rounded,
-                      color: theme.colorScheme.primary,
-                    ),
-                    onPressed: _openSortFilterSheet,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Release Calendar',
+                        icon: const Icon(Icons.calendar_month_rounded),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ReleaseCalendarScreen(),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Sort & Filter',
+                        icon: Icon(
+                          Icons.tune_rounded,
+                          color: theme.colorScheme.primary,
+                        ),
+                        onPressed: _openSortFilterSheet,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -993,6 +1016,57 @@ class HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
 
+                      if (provider.allCustomTags.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 32,
+                          child: ListView.separated(
+                            physics: const BouncingScrollPhysics(),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            scrollDirection: Axis.horizontal,
+                            itemCount: provider.allCustomTags.length + 1,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 6),
+                            itemBuilder: (context, index) {
+                              if (index == 0) {
+                                final isSelected = provider.selectedTag == null;
+                                return FilterChip(
+                                  label: const Text(
+                                    'All Tags',
+                                    style: TextStyle(fontSize: 11),
+                                  ),
+                                  selected: isSelected,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                  ),
+                                  onSelected: (_) =>
+                                      provider.setSelectedTag(null),
+                                );
+                              }
+                              final tag = provider.allCustomTags[index - 1];
+                              final isSelected = provider.selectedTag == tag;
+                              return FilterChip(
+                                label: Text(
+                                  '#$tag',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                selected: isSelected,
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                onSelected: (selected) {
+                                  provider.setSelectedTag(
+                                    selected ? tag : null,
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+
                       const SizedBox(height: 10),
 
                       Expanded(
@@ -1030,6 +1104,7 @@ class HomeScreenState extends State<HomeScreen> {
                                         provider.allShows,
                                         pageCategory,
                                       ),
+                                      provider.selectedTag,
                                     );
 
                                     if (categoryShows.isEmpty) {

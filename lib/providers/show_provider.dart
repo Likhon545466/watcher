@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/show.dart';
+import '../services/home_widget_service.dart';
 import '../services/notification_service.dart';
 import '../services/storage_service.dart';
 import '../services/tmdb_service.dart';
@@ -57,6 +58,7 @@ class ShowProvider with ChangeNotifier {
   final Map<String, DateTime> _deletedShowTombstones = <String, DateTime>{};
 
   String _selectedCategory = 'All';
+  String? _selectedTag;
   String _searchQuery = '';
 
   bool _loading = true;
@@ -78,12 +80,29 @@ class ShowProvider with ChangeNotifier {
 
   String get selectedCategory => _selectedCategory;
 
+  String? get selectedTag => _selectedTag;
+
   String get searchQuery => _searchQuery;
 
   bool get loading => _loading;
 
   Map<String, DateTime> get deletedShowTombstones =>
       Map<String, DateTime>.unmodifiable(_deletedShowTombstones);
+
+  List<String> get allCustomTags {
+    final tags = <String>{};
+    for (final show in _shows) {
+      tags.addAll(show.customTags);
+    }
+    final list = tags.toList()..sort();
+    return list;
+  }
+
+  void setSelectedTag(String? tag) {
+    if (_selectedTag == tag) return;
+    _selectedTag = tag;
+    notifyListeners();
+  }
 
   // ==========================================================
   // FILTERED SHOWS
@@ -94,6 +113,10 @@ class ShowProvider with ChangeNotifier {
 
     if (_selectedCategory != 'All') {
       filtered = filtered.where((show) => show.status == _selectedCategory);
+    }
+
+    if (_selectedTag != null && _selectedTag!.isNotEmpty) {
+      filtered = filtered.where((show) => show.customTags.contains(_selectedTag));
     }
 
     final query = _searchQuery.trim().toLowerCase();
@@ -1586,6 +1609,159 @@ class ShowProvider with ChangeNotifier {
   }
 
   // ==========================================================
+  // CUSTOM TAGS & LISTS
+  // ==========================================================
+
+  Future<void> addTagToShow(String id, String tag) async {
+    final cleanTag = tag.trim();
+    if (cleanTag.isEmpty) return;
+    final show = byId(id);
+    if (show == null || show.customTags.contains(cleanTag)) return;
+    final tags = List<String>.from(show.customTags)..add(cleanTag);
+    await updateShow(show.copyWith(customTags: tags));
+  }
+
+  Future<void> removeTagFromShow(String id, String tag) async {
+    final cleanTag = tag.trim();
+    final show = byId(id);
+    if (show == null || !show.customTags.contains(cleanTag)) return;
+    final tags = List<String>.from(show.customTags)..remove(cleanTag);
+    await updateShow(show.copyWith(customTags: tags));
+  }
+
+  // ==========================================================
+  // EPISODE GUIDE CHECKLIST
+  // ==========================================================
+
+  Future<void> setEpisodeWatched(
+    String id,
+    int season,
+    int episode,
+    bool watched,
+  ) async {
+    final show = byId(id);
+    if (show == null || !show.isSeries) return;
+
+    final progress = Map<int, int>.from(show.seasonProgress);
+    int targetEpisode;
+    if (watched) {
+      targetEpisode = episode;
+    } else {
+      targetEpisode = (episode - 1).clamp(0, 99999);
+    }
+
+    progress[season] = targetEpisode;
+    final isCurrent = season == show.currentSeason;
+    var status = show.status;
+    if (status == 'Plan to Watch' && targetEpisode > 0) {
+      status = 'Watching';
+    }
+
+    var updated = show.copyWith(
+      currentSeason: isCurrent ? show.currentSeason : season,
+      currentEpisode: targetEpisode,
+      seasonProgress: progress,
+      status: status,
+      lastWatchedAt: DateTime.now(),
+    );
+
+    if (updated.isSeriesFullyWatched) {
+      updated = updated.copyWith(
+        status: 'Completed',
+        lastWatchedAt: DateTime.now(),
+      );
+    }
+
+    await updateShow(updated);
+  }
+
+  Future<void> markEpisodesUpTo(String id, int season, int episode) async {
+    final show = byId(id);
+    if (show == null || !show.isSeries) return;
+
+    final progress = Map<int, int>.from(show.seasonProgress);
+    progress[season] = episode;
+    var status = show.status;
+    if (status == 'Plan to Watch' && episode > 0) {
+      status = 'Watching';
+    }
+
+    var updated = show.copyWith(
+      currentSeason: season,
+      currentEpisode: episode,
+      seasonProgress: progress,
+      status: status,
+      lastWatchedAt: DateTime.now(),
+    );
+
+    if (updated.isSeriesFullyWatched) {
+      updated = updated.copyWith(
+        status: 'Completed',
+        lastWatchedAt: DateTime.now(),
+      );
+    }
+
+    await updateShow(updated);
+  }
+
+  // ==========================================================
+  // MOVIE PREMIERE REMINDER
+  // ==========================================================
+
+  Future<EpisodeReminderResult> setMovieReminderEnabled(
+    String id,
+    bool enabled, {
+    DateTime? releaseDate,
+  }) async {
+    final original = byId(id);
+    if (original == null) return EpisodeReminderResult.showNotFound;
+    if (original.isSeries) return EpisodeReminderResult.notSeries;
+
+    if (!enabled) {
+      await NotificationService.cancelMovieReminder(original.id);
+      await updateShow(
+        original.copyWith(
+          movieReminderEnabled: false,
+          movieReleaseDate: null,
+        ),
+      );
+      return EpisodeReminderResult.disabled;
+    }
+
+    final permission =
+        await NotificationService.requestNotificationPermission();
+    if (!permission) return EpisodeReminderResult.permissionDenied;
+
+    final targetDate = releaseDate ?? original.movieReleaseDate;
+    if (targetDate == null || !targetDate.isAfter(DateTime.now())) {
+      await updateShow(
+        original.copyWith(
+          movieReminderEnabled: true,
+          movieReleaseDate: targetDate,
+        ),
+      );
+      return EpisodeReminderResult.enabledWaitingForEpisode;
+    }
+
+    final scheduled = await NotificationService.scheduleMovieReminder(
+      showId: original.id,
+      showTitle: original.title,
+      releaseDate: targetDate,
+    );
+
+    await updateShow(
+      original.copyWith(
+        movieReminderEnabled: true,
+        movieReleaseDate: targetDate,
+      ),
+    );
+
+    return scheduled
+        ? EpisodeReminderResult.scheduled
+        : EpisodeReminderResult.enabledWaitingForEpisode;
+  }
+
+  // ==========================================================
   // HOME SILENT SERIES SYNC
   // ==========================================================
 
@@ -2391,5 +2567,6 @@ class ShowProvider with ChangeNotifier {
     );
 
     await _saveDeletedShowTombstones(prefs);
+    unawaited(HomeWidgetService.updateWidgetData(_shows));
   }
 }

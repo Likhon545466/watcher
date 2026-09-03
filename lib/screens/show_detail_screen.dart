@@ -8,9 +8,13 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/show.dart';
+import '../models/tmdb_episode_detail.dart';
+import '../models/tmdb_video.dart';
 import '../providers/show_provider.dart';
+import '../services/notification_service.dart';
 import '../services/omdb_service.dart';
 import '../services/tmdb_service.dart';
 import '../utils/status_style.dart';
@@ -53,6 +57,14 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
   bool _hasFetchedRecommendations = false;
 
   final Set<String> _addingRecommendationIds = <String>{};
+
+  // ==========================================================
+  // TRAILERS & TEASERS
+  // ==========================================================
+
+  List<TmdbVideo> _videos = const <TmdbVideo>[];
+  bool _loadingVideos = false;
+  bool _hasFetchedVideos = false;
 
   // ==========================================================
   // PERSONAL NOTE
@@ -870,8 +882,755 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
   }
 
   // ==========================================================
-  // DATE FORMAT
+  // FETCH VIDEOS
   // ==========================================================
+
+  Future<void> _fetchVideosIfNeeded(Show show) async {
+    if (_hasFetchedVideos || _loadingVideos) return;
+    setState(() {
+      _loadingVideos = true;
+    });
+
+    try {
+      final videos = await TmdbService.fetchVideos(
+        showId: show.id,
+        title: show.title,
+        type: show.type,
+      );
+      if (mounted) {
+        setState(() {
+          _videos = videos;
+          _hasFetchedVideos = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _videos = const <TmdbVideo>[];
+          _hasFetchedVideos = true;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingVideos = false;
+        });
+      }
+    }
+  }
+
+  void _showTrailersModal(Show show) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final bottom = MediaQuery.of(sheetContext).padding.bottom;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(14, 0, 14, 16 + bottom),
+              child: GlassContainer(
+                borderRadius: 24,
+                padding: const EdgeInsets.all(18),
+                opacity: 0.96,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 14),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.onSurfaceVariant.withOpacity(
+                            0.28,
+                          ),
+                          borderRadius: BorderRadius.circular(100),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.play_circle_fill_rounded,
+                          color: Colors.redAccent,
+                          size: 26,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Official Trailers & Clips',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              Text(
+                                show.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (_loadingVideos)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32),
+                        child: Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    else if (_videos.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: Text(
+                            'No trailers or clips found.',
+                            style: TextStyle(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight:
+                              MediaQuery.of(sheetContext).size.height * 0.55,
+                        ),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: _videos.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (ctx, i) {
+                            final video = _videos[i];
+                            return InkWell(
+                              onTap: () async {
+                                final uri = Uri.parse(video.youtubeUrl);
+                                if (await canLaunchUrl(uri)) {
+                                  await launchUrl(
+                                    uri,
+                                    mode: LaunchMode.externalApplication,
+                                  );
+                                }
+                              },
+                              borderRadius: BorderRadius.circular(14),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: theme
+                                      .colorScheme
+                                      .surfaceContainerHighest
+                                      .withOpacity(0.35),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: theme.colorScheme.outlineVariant
+                                        .withOpacity(0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          child: CachedNetworkImage(
+                                            imageUrl: video.thumbnailUrl,
+                                            width: 100,
+                                            height: 58,
+                                            fit: BoxFit.cover,
+                                            errorWidget: (_, __, ___) =>
+                                                Container(
+                                                  width: 100,
+                                                  height: 58,
+                                                  color: Colors.black26,
+                                                  child: const Icon(
+                                                    Icons.movie_rounded,
+                                                  ),
+                                                ),
+                                          ),
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withOpacity(
+                                              0.65,
+                                            ),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.play_arrow_rounded,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            video.name,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 12.5,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: video.official
+                                                  ? theme.colorScheme.primary
+                                                        .withOpacity(0.15)
+                                                  : theme
+                                                        .colorScheme
+                                                        .surfaceContainerHighest,
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              video.official
+                                                  ? 'Official ${video.type}'
+                                                  : video.type,
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w700,
+                                                color: video.official
+                                                    ? theme.colorScheme.primary
+                                                    : theme
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ==========================================================
+  // EPISODE GUIDE & CHECKLIST (FEATURE 4)
+  // ==========================================================
+
+  void _showEpisodeGuideModal(Show show) {
+    int currentModalSeason = show.currentSeason;
+    List<TmdbEpisodeDetail> episodes = const <TmdbEpisodeDetail>[];
+    bool loadingEpisodes = true;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final bottom = MediaQuery.of(sheetContext).padding.bottom;
+        final totalSeasons = show.totalSeasons > 0
+            ? show.totalSeasons
+            : (show.seasonProgress.keys.isNotEmpty
+                  ? show.seasonProgress.keys.reduce(
+                      (a, b) => a > b ? a : b,
+                    )
+                  : 1);
+
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            void loadEpisodesForSeason(int s) async {
+              setModalState(() {
+                loadingEpisodes = true;
+                currentModalSeason = s;
+              });
+              final result = await TmdbService.fetchSeasonEpisodeDetails(
+                showId: show.id,
+                title: show.title,
+                seasonNumber: s,
+              );
+              setModalState(() {
+                episodes = result;
+                loadingEpisodes = false;
+              });
+            }
+
+            if (loadingEpisodes && episodes.isEmpty) {
+              loadEpisodesForSeason(currentModalSeason);
+            }
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(14, 0, 14, 16 + bottom),
+              child: GlassContainer(
+                borderRadius: 24,
+                padding: const EdgeInsets.all(18),
+                opacity: 0.96,
+                child: Consumer<ShowProvider>(
+                  builder: (context, provider, _) {
+                    final currentShow = provider.byId(show.id) ?? show;
+                    final watchedUpTo =
+                        currentShow.seasonProgress[currentModalSeason] ?? 0;
+
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 36,
+                            height: 4,
+                            margin: const EdgeInsets.only(bottom: 14),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.onSurfaceVariant
+                                  .withOpacity(0.28),
+                              borderRadius: BorderRadius.circular(100),
+                            ),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.checklist_rounded,
+                              color: Color(0xFF6C5CE7),
+                              size: 26,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Season Episode Guide & Checklist',
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  ),
+                                  Text(
+                                    '${currentShow.title} • Season $currentModalSeason',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        // SEASON CHIPS SELECTOR
+                        SizedBox(
+                          height: 36,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: totalSeasons,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 8),
+                            itemBuilder: (ctx, idx) {
+                              final s = idx + 1;
+                              final isSelected = s == currentModalSeason;
+                              return ChoiceChip(
+                                label: Text(
+                                  'Season $s',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w800
+                                        : FontWeight.w600,
+                                  ),
+                                ),
+                                selected: isSelected,
+                                onSelected: (sel) {
+                                  if (sel) loadEpisodesForSeason(s);
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        if (loadingEpisodes)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 36),
+                            child: Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else if (episodes.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 24),
+                            child: Center(
+                              child: Text(
+                                'No detailed episode list available for Season $currentModalSeason.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxHeight:
+                                  MediaQuery.of(sheetContext).size.height *
+                                  0.50,
+                            ),
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: episodes.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (ctx, i) {
+                                final ep = episodes[i];
+                                final isWatched =
+                                    ep.episodeNumber <= watchedUpTo;
+
+                                return Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: isWatched
+                                        ? theme.colorScheme.primaryContainer
+                                              .withOpacity(0.2)
+                                        : theme
+                                              .colorScheme
+                                              .surfaceContainerHighest
+                                              .withOpacity(0.35),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isWatched
+                                          ? theme.colorScheme.primary
+                                                .withOpacity(0.4)
+                                          : theme.colorScheme.outlineVariant
+                                                .withOpacity(0.25),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (ep.stillUrl != null &&
+                                          ep.stillUrl!.isNotEmpty)
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          child: CachedNetworkImage(
+                                            imageUrl: ep.stillUrl!,
+                                            width: 80,
+                                            height: 48,
+                                            fit: BoxFit.cover,
+                                            errorWidget: (_, __, ___) =>
+                                                Container(
+                                                  width: 80,
+                                                  height: 48,
+                                                  color: Colors.black26,
+                                                  child: const Icon(
+                                                    Icons.tv_rounded,
+                                                    size: 20,
+                                                  ),
+                                                ),
+                                          ),
+                                        )
+                                      else
+                                        Container(
+                                          width: 44,
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            color: theme
+                                                .colorScheme
+                                                .surfaceContainerHighest,
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            'E${ep.episodeNumber}',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'E${ep.episodeNumber}: ${ep.name.isNotEmpty ? ep.name : "Episode ${ep.episodeNumber}"}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 13,
+                                                color: isWatched
+                                                    ? theme.colorScheme.primary
+                                                    : null,
+                                              ),
+                                            ),
+                                            if (ep.airDate != null && ep.airDate!.isNotEmpty) ...[
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'Air date: ${ep.airDate}',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: theme
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
+                                              ),
+                                            ],
+                                            if (ep.overview.isNotEmpty) ...[
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                ep.overview,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontSize: 11.5,
+                                                  color: theme
+                                                      .colorScheme
+                                                      .onSurfaceVariant
+                                                      .withOpacity(0.9),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        icon: Icon(
+                                          isWatched
+                                              ? Icons.check_circle_rounded
+                                              : Icons
+                                                    .radio_button_unchecked_rounded,
+                                          color: isWatched
+                                              ? theme.colorScheme.primary
+                                              : theme
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                          size: 24,
+                                        ),
+                                        tooltip: isWatched
+                                            ? 'Mark as unread'
+                                            : 'Mark watched',
+                                        onPressed: () {
+                                          provider.setEpisodeWatched(
+                                            currentShow.id,
+                                            currentModalSeason,
+                                            ep.episodeNumber,
+                                            !isWatched,
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ==========================================================
+  // CUSTOM TAGS DIALOG (FEATURE 7)
+  // ==========================================================
+
+  void _showAddTagDialog(Show show) {
+    final controller = TextEditingController();
+    const suggestions = <String>[
+      'Favorites',
+      'Rewatch',
+      'Anime',
+      'Weekend Binge',
+      'Netflix',
+      'Marvel',
+      'Must Watch',
+      'Masterpiece',
+    ];
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) {
+        final theme = Theme.of(dialogCtx);
+        return AlertDialog(
+          title: const Text('Add Custom Tag'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Tag Name',
+                  hintText: 'e.g. Favorites, Anime, Rewatch',
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Quick Suggestions:',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: suggestions.map((tag) {
+                  return ActionChip(
+                    label: Text(tag, style: const TextStyle(fontSize: 11.5)),
+                    onPressed: () {
+                      context.read<ShowProvider>().addTagToShow(show.id, tag);
+                      Navigator.pop(dialogCtx);
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final text = controller.text.trim();
+                if (text.isNotEmpty) {
+                  context.read<ShowProvider>().addTagToShow(show.id, text);
+                }
+                Navigator.pop(dialogCtx);
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ==========================================================
+  // TOGGLE MOVIE REMINDER (FEATURE 11)
+  // ==========================================================
+
+  Future<void> _toggleMovieReminder(Show show, bool enabled) async {
+    if (_changingReminder) return;
+    setState(() {
+      _changingReminder = true;
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      DateTime? releaseDate = show.movieReleaseDate;
+      if (releaseDate == null && show.yearText.isNotEmpty) {
+        final parsedYear = int.tryParse(show.yearText.trim());
+        if (parsedYear != null && parsedYear >= DateTime.now().year) {
+          releaseDate = DateTime(parsedYear, 12, 1);
+        }
+      }
+
+      final result = await context
+          .read<ShowProvider>()
+          .setMovieReminderEnabled(show.id, enabled, releaseDate: releaseDate);
+
+      if (!mounted) return;
+
+      switch (result) {
+        case EpisodeReminderResult.scheduled:
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                'Movie release reminder scheduled for ${_formatEpisodeDate(show.movieReleaseDate ?? DateTime.now())}.',
+              ),
+            ),
+          );
+          break;
+        case EpisodeReminderResult.enabledWaitingForEpisode:
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Reminder enabled! You will be alerted when the movie officially releases.',
+              ),
+            ),
+          );
+          break;
+        case EpisodeReminderResult.disabled:
+          messenger.showSnackBar(
+            const SnackBar(content: Text('Movie reminder turned off.')),
+          );
+          break;
+        case EpisodeReminderResult.permissionDenied:
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Notification permission was not allowed.'),
+            ),
+          );
+          break;
+        default:
+          break;
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _changingReminder = false;
+        });
+      }
+    }
+  }
 
   String _formatEpisodeDate(DateTime date) {
     const months = <String>[
@@ -1552,6 +2311,40 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
                           ),
                         ),
                       ],
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              _fetchVideosIfNeeded(show);
+                              _showTrailersModal(show);
+                            },
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            icon: const Icon(
+                              Icons.play_circle_outline_rounded,
+                              size: 16,
+                              color: Colors.redAccent,
+                            ),
+                            label: const Text(
+                              'Trailers',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -1654,57 +2447,216 @@ class _ShowDetailScreenState extends State<ShowDetailScreen> {
                     ),
             ),
 
-            // UNIFIED WATCH PANEL (REMINDER + PROGRESS TRACKER)
-            if (show.isSeries) ...<Widget>[
-              const SizedBox(height: 20),
-              Text(
-                'Watch Panel',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
+            // CUSTOM TAGS & LISTS PANEL (FEATURE 7)
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Tags & Lists',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _showAddTagDialog(show),
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Add Tag'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               GlassContainer(
-                borderRadius: 18,
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _EpisodeReminderContent(
-                      show: show,
-                      busy: _changingReminder,
-                      formatDate: _formatEpisodeDate,
-                      onChanged: (enabled) =>
-                          _toggleEpisodeReminder(show, enabled),
-                    ),
-                    const Divider(height: 28),
-                    _ProgressTrackerContent(
-                      show: show,
-                      loadingSeason: _loadingSeason == show.currentSeason,
-                      seasonError: _seasonErrorSeason == show.currentSeason
-                          ? _seasonError
-                          : null,
-                      onSeasonMinus: show.currentSeason > 1
-                          ? () => _changeSeason(show, -1)
-                          : null,
-                      onSeasonPlus: () => _changeSeason(show, 1),
-                      onEpisodeMinus:
-                          show.currentSeason == 1 && show.currentEpisode == 0
-                          ? null
-                          : () => context.read<ShowProvider>().decrementEpisode(
-                              show.id,
+                padding: const EdgeInsets.all(12),
+                borderRadius: 14,
+                child: show.customTags.isEmpty
+                    ? InkWell(
+                        onTap: () => _showAddTagDialog(show),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.label_outline_rounded,
+                                size: 18,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'No tags added yet. Tap here to add custom tags/lists.',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: show.customTags.map((tag) {
+                          return InputChip(
+                            label: Text(
+                              tag,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                      onEpisodePlus: () => context
-                          .read<ShowProvider>()
-                          .incrementEpisode(show.id),
-                      onMarkSeasonComplete: () => _markSeasonComplete(show),
-                    ),
-                  ],
-                ),
+                            deleteIcon: const Icon(
+                              Icons.close_rounded,
+                              size: 14,
+                            ),
+                            onDeleted: () => context
+                                .read<ShowProvider>()
+                                .removeTagFromShow(show.id, tag),
+                          );
+                        }).toList(),
+                      ),
               ),
-            ],
 
+              // UNIFIED WATCH PANEL (REMINDER + PROGRESS TRACKER + EPISODE GUIDE)
+              if (show.isSeries) ...<Widget>[
+                const SizedBox(height: 20),
+                Text(
+                  'Watch Panel',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GlassContainer(
+                  borderRadius: 18,
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _EpisodeReminderContent(
+                        show: show,
+                        busy: _changingReminder,
+                        formatDate: _formatEpisodeDate,
+                        onChanged: (enabled) =>
+                            _toggleEpisodeReminder(show, enabled),
+                      ),
+                      const Divider(height: 28),
+                      _ProgressTrackerContent(
+                        show: show,
+                        loadingSeason: _loadingSeason == show.currentSeason,
+                        seasonError: _seasonErrorSeason == show.currentSeason
+                            ? _seasonError
+                            : null,
+                        onSeasonMinus: show.currentSeason > 1
+                            ? () => _changeSeason(show, -1)
+                            : null,
+                        onSeasonPlus: () => _changeSeason(show, 1),
+                        onEpisodeMinus:
+                            show.currentSeason == 1 && show.currentEpisode == 0
+                            ? null
+                            : () => context
+                                  .read<ShowProvider>()
+                                  .decrementEpisode(show.id),
+                        onEpisodePlus: () => context
+                            .read<ShowProvider>()
+                            .incrementEpisode(show.id),
+                        onMarkSeasonComplete: () => _markSeasonComplete(show),
+                      ),
+                      const Divider(height: 28),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _showEpisodeGuideModal(show),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          icon: const Icon(Icons.checklist_rounded, size: 18),
+                          label: const Text(
+                            'Episode Guide & Checklist',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...<Widget>[
+                const SizedBox(height: 20),
+                Text(
+                  'Watch Panel',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GlassContainer(
+                  borderRadius: 18,
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          show.movieReminderEnabled
+                              ? Icons.notifications_active_rounded
+                              : Icons.notifications_none_rounded,
+                          color: show.movieReminderEnabled
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurfaceVariant,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Premiere Release Reminder',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              show.movieReleaseDate != null
+                                  ? 'Releases ${_formatEpisodeDate(show.movieReleaseDate!)}'
+                                  : (show.movieReminderEnabled
+                                        ? 'Reminder active for premiere date'
+                                        : 'Get notified on movie release day'),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: show.movieReminderEnabled,
+                        onChanged: _changingReminder
+                            ? null
+                            : (val) => _toggleMovieReminder(show, val),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             // UNIFIED ABOUT PANEL (PLOT, CAST, CREW, AWARDS)
             const SizedBox(height: 20),
             Text(
