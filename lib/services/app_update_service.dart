@@ -227,6 +227,23 @@ class AppUpdateService {
     'User-Agent': 'Watcher-App',
   };
 
+  static bool _hasCheckedStartupUpdate = false;
+
+  /// Checks if a newer version exists on GitHub than the current app version.
+  /// Returns [AppReleaseInfo] if a newer version is available, or null otherwise.
+  static Future<AppReleaseInfo?> checkForNewVersion({
+    required String currentVersion,
+    String? buildNumber,
+  }) async {
+    try {
+      final release = await getLatestRelease();
+      if (release != null && release.isNewerThan(currentVersion, buildNumber)) {
+        return release;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Checks for the latest release on GitHub with multi-tier fallback:
   /// 1. GitHub REST API (`/releases/latest` or `/releases?per_page=1`)
   /// 2. Raw repository files (`.watcher_version` / `CHANGELOG.md`) to bypass rate limits

@@ -43,6 +43,18 @@ class ChangelogData {
       version: 'AUTO',
       date: '11 Sep 2026',
       newFeatures: [
+        'Added Home Screen Auto Update Popup that checks GitHub on app launch and prompts when a new release is available.',
+        'Added instant version comparison, APK file size badge, and direct APK download button.',
+      ],
+      improvements: [
+        'Non-intrusive background checking that fails silently when offline or up-to-date.',
+      ],
+      bugFixes: [],
+    ),
+    ChangelogItem(
+      version: '4.2.9',
+      date: '11 Sep 2026',
+      newFeatures: [
         'Added in-app GitHub Update Checker with live release comparison and APK download.',
         'Added dedicated GitHub & Developer Info Screen (@Likhon545466) with live stats and quick links.',
         'Added quick action buttons in Settings for Release Notes, Check Update, and GitHub Info.',

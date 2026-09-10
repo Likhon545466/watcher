@@ -2,6 +2,17 @@
 
 All notable changes to the Watcher application are documented in this file.
 
+## [4.3.0] - 2026-09-11
+
+### Added
+- **Home Screen Auto Update Popup**: Automatic background GitHub update check on app startup with an interactive glassmorphic update popup directly on the Home Screen.
+- **Direct Download & Release Details**: Version comparison (`Installed` ➔ `New Version`), APK file size badge, formatted release date, and instant APK download action.
+
+### Changed / Improved
+- **Non-Intrusive Background Checking**: Smooth, delayed startup check that fails silently if offline or up to date without impacting app launch speed or UI animations.
+
+---
+
 ## [4.2.9] - 2026-09-11
 
 ### Added

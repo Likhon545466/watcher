@@ -71,5 +71,24 @@ void main() {
       expect(release!.tagName.isNotEmpty, isTrue);
       expect(release.title.isNotEmpty, isTrue);
     });
+
+    test('AppUpdateService.checkForNewVersion returns null when on latest version', () async {
+      // Testing with a future version higher than the repo latest
+      final release = await AppUpdateService.checkForNewVersion(
+        currentVersion: '99.0.0',
+        buildNumber: '999',
+      );
+      expect(release, isNull);
+    });
+
+    test('AppUpdateService.checkForNewVersion returns release when older version provided', () async {
+      // Testing with older version 1.0.0
+      final release = await AppUpdateService.checkForNewVersion(
+        currentVersion: '1.0.0',
+        buildNumber: '1',
+      );
+      expect(release, isNotNull);
+      expect(release!.tagName.isNotEmpty, isTrue);
+    });
   });
 }

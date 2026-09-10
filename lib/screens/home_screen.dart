@@ -5,14 +5,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import 'package:package_info_plus/package_info_plus.dart';
+
 import '../models/omdb_search_item.dart';
 import '../models/show.dart';
 import '../providers/show_provider.dart';
+import '../services/app_update_service.dart';
 import '../services/omdb_service.dart';
 import '../utils/status_style.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/poster_image.dart';
 import '../widgets/round_step_button.dart';
+import '../widgets/update_popup_dialog.dart';
 import 'add_edit_show_screen.dart';
 import 'release_calendar_screen.dart';
 import 'show_detail_screen.dart';
@@ -100,6 +104,8 @@ class HomeScreenState extends State<HomeScreen> {
 
       _scrollToCategory(initialIndex);
     });
+
+    _scheduleUpdateCheck();
   }
 
   @override
@@ -114,6 +120,52 @@ class HomeScreenState extends State<HomeScreen> {
     _categoryScrollController.dispose();
 
     super.dispose();
+  }
+
+  // ==========================================================
+  // STARTUP GITHUB UPDATE CHECK
+  // ==========================================================
+
+  static bool _updateCheckedThisSession = false;
+
+  void _scheduleUpdateCheck() {
+    if (_updateCheckedThisSession) {
+      return;
+    }
+
+    _updateCheckedThisSession = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 1800), () async {
+        if (!mounted) {
+          return;
+        }
+
+        try {
+          final info = await PackageInfo.fromPlatform();
+          final appVersion = info.version;
+          final buildNumber = info.buildNumber;
+
+          final newerRelease = await AppUpdateService.checkForNewVersion(
+            currentVersion: appVersion,
+            buildNumber: buildNumber,
+          );
+
+          if (!mounted || newerRelease == null) {
+            return;
+          }
+
+          await UpdatePopupDialog.show(
+            context,
+            release: newerRelease,
+            currentVersion: 'v$appVersion',
+            buildNumber: buildNumber,
+          );
+        } catch (_) {
+          // Fail silently on background check to avoid disturbing the user
+        }
+      });
+    });
   }
 
   // ==========================================================
