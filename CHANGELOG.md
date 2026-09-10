@@ -2,6 +2,22 @@
 
 All notable changes to the Watcher application are documented in this file.
 
+## [4.2.9] - 2026-09-11
+
+### Added
+- **In-App GitHub Update Checker**: Interactive modal with GitHub Releases integration, dual-tier fallback to bypass API rate limits, version comparison, and direct APK download.
+- **Dedicated GitHub & Developer Info Screen**: Developer profile (@Likhon545466), live repository stats (stars, forks, open issues), quick links (releases, issues, changelog), and complete tech stack details.
+- **Settings Integration**: Quick-action navigation pills in Watcher Info card for **Release Notes**, **Check Update**, and **GitHub Info**.
+
+### Changed / Improved
+- **Multi-Tier Update Architecture**: Robust update checking mechanism connecting to GitHub REST API with automatic fallback to raw GitHub version and changelog metadata.
+- **Polished Glassmorphic UI**: High-fidelity frosted glass cards, pulsing radar animations during update checks, and responsive layout.
+
+### Fixed
+- **GitHub API Rate-Limit Handling**: Resolved 403 rate limit errors on unauthenticated network connections using smart raw repository fallback.
+
+---
+
 ## [4.2.7] - 2026-09-03
 
 ### Added

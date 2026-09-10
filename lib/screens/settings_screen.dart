@@ -8,8 +8,10 @@ import '../models/changelog_item.dart';
 import '../providers/settings_provider.dart';
 import '../providers/show_provider.dart';
 import '../widgets/glass_container.dart';
+import '../widgets/update_checker_modal.dart';
 import 'appearance_screen.dart';
 import 'data_backup_screen.dart';
+import 'github_info_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -46,6 +48,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _buildNumber = info.buildNumber;
       });
     } catch (_) {}
+  }
+
+  // ==========================================================
+  // UPDATES & GITHUB
+  // ==========================================================
+
+  void _showUpdateCheckerModal() {
+    UpdateCheckerModal.show(
+      context,
+      currentVersion: _appVersion,
+      buildNumber: _buildNumber,
+    );
+  }
+
+  void _openGithubInfoScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GithubInfoScreen()),
+    );
   }
 
   // ==========================================================
@@ -247,146 +268,181 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ==================================================
           // WATCHER CARD
           // ==================================================
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: _showChangelogModal,
-              child: GlassContainer(
-                borderRadius: 24,
-                padding: const EdgeInsets.all(16),
-                opacity: 0.13,
-                borderColor: primary.withOpacity(0.18),
-                child: Column(
+          GlassContainer(
+            borderRadius: 24,
+            padding: const EdgeInsets.all(16),
+            opacity: 0.13,
+            borderColor: primary.withOpacity(0.18),
+            child: Column(
+              children: [
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 54,
-                          height: 54,
-                          decoration: BoxDecoration(
-                            color: primary.withOpacity(0.14),
-                            borderRadius: BorderRadius.circular(17),
-                            border: Border.all(
-                              color: primary.withOpacity(0.18),
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.movie_filter_rounded,
-                            size: 28,
-                            color: primary,
-                          ),
+                    Container(
+                      width: 54,
+                      height: 54,
+                      decoration: BoxDecoration(
+                        color: primary.withOpacity(0.14),
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(
+                          color: primary.withOpacity(0.18),
                         ),
-
-                        const SizedBox(width: 14),
-
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Watcher',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.2,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Personal movie & series tracker',
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: colors.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 23,
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ],
+                      ),
+                      child: Icon(
+                        Icons.movie_filter_rounded,
+                        size: 28,
+                        color: primary,
+                      ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(width: 14),
 
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colors.onSurface.withOpacity(0.035),
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(
-                          color: colors.outline.withOpacity(0.07),
-                        ),
-                      ),
-                      child: Row(
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: _AppStat(
-                              label: 'Version',
-                              value: _appVersion,
+                          const Text(
+                            'Watcher',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
                             ),
                           ),
-
-                          _MiniDivider(color: colors.outline.withOpacity(0.12)),
-
-                          Expanded(
-                            child: _AppStat(
-                              label: 'Build',
-                              value: _buildNumber,
-                            ),
-                          ),
-
-                          _MiniDivider(color: colors.outline.withOpacity(0.12)),
-
-                          Expanded(
-                            child: _AppStat(
-                              label: 'Library',
-                              value: '$showCount $itemLabel',
+                          const SizedBox(height: 2),
+                          Text(
+                            'Personal movie & series tracker',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: colors.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 13),
-
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.auto_awesome_rounded,
-                          size: 16,
-                          color: primary,
-                        ),
-                        const SizedBox(width: 7),
-                        Text(
-                          'View release notes',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: primary,
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _openGithubInfoScreen,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: primary.withOpacity(0.09),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: primary.withOpacity(0.20),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.code_rounded,
+                                size: 14,
+                                color: primary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'GitHub',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: primary,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const Spacer(),
-                        Text(
-                          'What\'s New',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: colors.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ],
                 ),
-              ),
+
+                const SizedBox(height: 16),
+
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.onSurface.withOpacity(0.035),
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(
+                      color: colors.outline.withOpacity(0.07),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _AppStat(
+                          label: 'Version',
+                          value: _appVersion,
+                        ),
+                      ),
+
+                      _MiniDivider(color: colors.outline.withOpacity(0.12)),
+
+                      Expanded(
+                        child: _AppStat(
+                          label: 'Build',
+                          value: _buildNumber,
+                        ),
+                      ),
+
+                      _MiniDivider(color: colors.outline.withOpacity(0.12)),
+
+                      Expanded(
+                        child: _AppStat(
+                          label: 'Library',
+                          value: '$showCount $itemLabel',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 14),
+
+                // 3 Action Buttons / Pills
+                Row(
+                  children: [
+                    // Release Notes
+                    Expanded(
+                      child: _WatcherQuickAction(
+                        icon: Icons.auto_awesome_rounded,
+                        label: 'Release Notes',
+                        accent: Colors.purpleAccent,
+                        onTap: _showChangelogModal,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Update Checker
+                    Expanded(
+                      child: _WatcherQuickAction(
+                        icon: Icons.system_update_alt_rounded,
+                        label: 'Check Update',
+                        accent: primary,
+                        onTap: _showUpdateCheckerModal,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // GitHub Info
+                    Expanded(
+                      child: _WatcherQuickAction(
+                        icon: Icons.folder_special_rounded,
+                        label: 'GitHub Info',
+                        accent: Colors.teal,
+                        onTap: _openGithubInfoScreen,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
 
@@ -939,5 +995,64 @@ class _MiniDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(width: 1, height: 27, color: color);
+  }
+}
+
+// ============================================================
+// WATCHER QUICK ACTION
+// ============================================================
+
+class _WatcherQuickAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _WatcherQuickAction({
+    required this.icon,
+    required this.label,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+          decoration: BoxDecoration(
+            color: accent.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: accent.withOpacity(0.18),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: accent),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: colors.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -41,6 +41,22 @@ class ChangelogData {
     // =========================================================
     ChangelogItem(
       version: 'AUTO',
+      date: '11 Sep 2026',
+      newFeatures: [
+        'Added in-app GitHub Update Checker with live release comparison and APK download.',
+        'Added dedicated GitHub & Developer Info Screen (@Likhon545466) with live stats and quick links.',
+        'Added quick action buttons in Settings for Release Notes, Check Update, and GitHub Info.',
+      ],
+      improvements: [
+        'Multi-tier update checking connecting to GitHub REST API with automatic raw repository fallback.',
+        'Polished glassmorphic UI with pulsing radar animations and responsive action pills.',
+      ],
+      bugFixes: [
+        'Fixed GitHub API 403 rate-limit errors during update checks by falling back to raw repository files.',
+      ],
+    ),
+    ChangelogItem(
+      version: '4.2.7',
       date: '03 Sep 2026',
       newFeatures: [
         'Added Trailers & Official Videos carousel in Show Details with direct YouTube playback support.',
