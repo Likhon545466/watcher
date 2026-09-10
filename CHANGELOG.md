@@ -2,6 +2,17 @@
 
 All notable changes to the Watcher application are documented in this file.
 
+## [4.3.1] - 2026-09-11
+
+### Added
+- **Optimized Startup Update Verification**: Enhanced live GitHub release detection and seamless update popup on the Home screen.
+- **Improved Update Dialog Performance**: Faster rendering and fluid dismissal transitions.
+
+### Changed / Improved
+- Polished version comparison and fallback caching for instantaneous update alerts.
+
+---
+
 ## [4.3.0] - 2026-09-11
 
 ### Added

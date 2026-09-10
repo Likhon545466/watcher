@@ -43,6 +43,18 @@ class ChangelogData {
       version: 'AUTO',
       date: '11 Sep 2026',
       newFeatures: [
+        'Enhanced live GitHub release detection and seamless update popup on the Home screen.',
+        'Faster update dialog rendering and fluid dismissal transitions.',
+      ],
+      improvements: [
+        'Polished version comparison and fallback caching for instantaneous update alerts.',
+      ],
+      bugFixes: [],
+    ),
+    ChangelogItem(
+      version: '4.3.0',
+      date: '11 Sep 2026',
+      newFeatures: [
         'Added Home Screen Auto Update Popup that checks GitHub on app launch and prompts when a new release is available.',
         'Added instant version comparison, APK file size badge, and direct APK download button.',
       ],
