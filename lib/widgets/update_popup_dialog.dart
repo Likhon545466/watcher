@@ -103,7 +103,6 @@ class _UpdatePopupDialogState extends State<UpdatePopupDialog>
     final isDark = theme.brightness == Brightness.dark;
     final primary = colors.primary;
     final release = widget.release;
-    final hasApk = release.apkDownloadUrl != null;
 
     final mediaQuery = MediaQuery.of(context);
     final maxHeight = mediaQuery.size.height * 0.82;
@@ -402,142 +401,89 @@ class _UpdatePopupDialogState extends State<UpdatePopupDialog>
                               const SizedBox(height: 20),
 
                               // Action Buttons
-                              if (hasApk) ...[
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () {
-                                      _launchUrl(release.apkDownloadUrl!);
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                      ),
-                                      backgroundColor: primary,
-                                      foregroundColor: colors.onPrimary,
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(16),
-                                      ),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    _launchUrl(release.directDownloadUrl);
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
                                     ),
-                                    icon: const Icon(
-                                      Icons.download_rounded,
-                                      size: 19,
+                                    backgroundColor: primary,
+                                    foregroundColor: colors.onPrimary,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(16),
                                     ),
-                                    label: Text(
-                                      'Download APK (${release.tagName})',
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700,
-                                      ),
+                                  ),
+                                  icon: const Icon(
+                                    Icons.download_rounded,
+                                    size: 20,
+                                  ),
+                                  label: Text(
+                                    'Download APK (${release.tagName})',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 9),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        onPressed: () {
-                                          _launchUrl(release.htmlUrl);
-                                        },
-                                        style: OutlinedButton.styleFrom(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 12,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(14),
-                                          ),
+                              ),
+                              const SizedBox(height: 9),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () {
+                                        _launchUrl(release.releasePageUrl);
+                                      },
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
                                         ),
-                                        icon: const Icon(
-                                          Icons.open_in_new_rounded,
-                                          size: 16,
-                                        ),
-                                        label: const Text(
-                                          'GitHub Page',
-                                          style: TextStyle(fontSize: 12.5),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(14),
                                         ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        style: TextButton.styleFrom(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 12,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(14),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          'Later',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: colors.onSurfaceVariant,
-                                          ),
-                                        ),
+                                      icon: const Icon(
+                                        Icons.open_in_new_rounded,
+                                        size: 16,
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ] else ...[
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () {
-                                      _launchUrl(release.htmlUrl);
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                      ),
-                                      backgroundColor: primary,
-                                      foregroundColor: colors.onPrimary,
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(16),
-                                      ),
-                                    ),
-                                    icon: const Icon(
-                                      Icons.open_in_new_rounded,
-                                      size: 19,
-                                    ),
-                                    label: Text(
-                                      'View & Download (${release.tagName})',
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700,
+                                      label: const Text(
+                                        'GitHub Release',
+                                        style: TextStyle(fontSize: 12.5),
                                       ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: TextButton(
-                                    onPressed: () => Navigator.pop(context),
-                                    style: TextButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 10,
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      style: TextButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                        ),
                                       ),
-                                    ),
-                                    child: Text(
-                                      'Remind Me Later',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: colors.onSurfaceVariant,
+                                      child: Text(
+                                        'Later',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: colors.onSurfaceVariant,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ],
                           ),
                         ),

@@ -404,7 +404,6 @@ class _UpdateCheckerModalState extends State<UpdateCheckerModal>
 
     if (_hasUpdate && _latestRelease != null) {
       final release = _latestRelease!;
-      final hasApk = release.apkDownloadUrl != null;
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -627,64 +626,44 @@ class _UpdateCheckerModalState extends State<UpdateCheckerModal>
           const SizedBox(height: 20),
 
           // Action Buttons
-          if (hasApk) ...[
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => _launchUrl(release.apkDownloadUrl!),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  backgroundColor: primary,
-                  foregroundColor: colors.onPrimary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _launchUrl(release.directDownloadUrl),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                backgroundColor: primary,
+                foregroundColor: colors.onPrimary,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                icon: const Icon(Icons.download_rounded, size: 20),
-                label: Text(
-                  'Download APK (${release.tagName})',
-                  style: const TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w700,
-                  ),
+              ),
+              icon: const Icon(Icons.download_rounded, size: 20),
+              label: Text(
+                'Download APK (${release.tagName})',
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _launchUrl(release.htmlUrl),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _launchUrl(release.releasePageUrl),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                label: const Text('View Release on GitHub'),
               ),
+              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              label: const Text('View Release on GitHub'),
             ),
-          ] else ...[
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => _launchUrl(release.htmlUrl),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  backgroundColor: primary,
-                  foregroundColor: colors.onPrimary,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                ),
-                icon: const Icon(Icons.open_in_new_rounded, size: 20),
-                label: Text('View & Download on GitHub (${release.tagName})'),
-              ),
-            ),
-          ],
+          ),
         ],
       );
     }

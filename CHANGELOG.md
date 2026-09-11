@@ -2,6 +2,16 @@
 
 All notable changes to the Watcher application are documented in this file.
 
+## [4.3.2] - 2026-09-11
+
+### Added
+- **Accurate Direct APK Downloads**: Direct APK download button now includes exact build tag and asset URLs matching GitHub releases.
+
+### Fixed
+- Fixed 404 error during direct APK download caused by build number omission in generated download links.
+
+---
+
 ## [4.3.1] - 2026-09-11
 
 ### Added

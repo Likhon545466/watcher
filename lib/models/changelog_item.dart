@@ -43,6 +43,19 @@ class ChangelogData {
       version: 'AUTO',
       date: '11 Sep 2026',
       newFeatures: [
+        'Accurate Direct APK Downloads with exact build tag and asset URLs matching GitHub releases.',
+      ],
+      improvements: [
+        'Enhanced update popup and update modal actions with one-tap direct APK download and release page links.',
+      ],
+      bugFixes: [
+        'Fixed 404 error on direct APK download caused by build number omission in generated download links.',
+      ],
+    ),
+    ChangelogItem(
+      version: '4.3.1',
+      date: '11 Sep 2026',
+      newFeatures: [
         'Enhanced live GitHub release detection and seamless update popup on the Home screen.',
         'Faster update dialog rendering and fluid dismissal transitions.',
       ],

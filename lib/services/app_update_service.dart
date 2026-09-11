@@ -72,13 +72,32 @@ class AppReleaseInfo {
       releaseNotes: (json['body'] as String?)?.trim() ?? '',
       publishedAt: publishedDate,
       htmlUrl: (json['html_url'] as String?) ??
-          'https://github.com/Likhon545466/watcher/releases',
+          'https://github.com/Likhon545466/watcher/releases/latest',
       apkDownloadUrl: apkUrl,
       apkName: apkFileName,
       apkSize: apkByteSize,
       downloadCount: totalDownloads,
       isPrerelease: (json['prerelease'] as bool?) ?? false,
     );
+  }
+
+  /// Web release page URL on GitHub
+  String get releasePageUrl {
+    if (htmlUrl.isNotEmpty && !htmlUrl.endsWith('/releases')) {
+      return htmlUrl;
+    }
+    if (tagName.isNotEmpty) {
+      return 'https://github.com/Likhon545466/watcher/releases/tag/$tagName';
+    }
+    return AppUpdateService.githubLatestReleaseUrl;
+  }
+
+  /// Direct APK download link (falling back to release page if not available)
+  String get directDownloadUrl {
+    if (apkDownloadUrl != null && apkDownloadUrl!.isNotEmpty) {
+      return apkDownloadUrl!;
+    }
+    return releasePageUrl;
   }
 
   /// Formatted APK size in MB
@@ -227,8 +246,6 @@ class AppUpdateService {
     'User-Agent': 'Watcher-App',
   };
 
-  static bool _hasCheckedStartupUpdate = false;
-
   /// Checks if a newer version exists on GitHub than the current app version.
   /// Returns [AppReleaseInfo] if a newer version is available, or null otherwise.
   static Future<AppReleaseInfo?> checkForNewVersion({
@@ -350,7 +367,11 @@ class AppUpdateService {
       final cleanVer = versionName.startsWith('v') || versionName.startsWith('V')
           ? versionName.substring(1)
           : versionName;
-      final tagName = 'v$cleanVer';
+
+      // GitHub tags in this repo include build number (e.g. v4.3.1+25)
+      final tagName = buildNumber.isNotEmpty
+          ? 'v$cleanVer+$buildNumber'
+          : 'v$cleanVer';
 
       final apkName = buildNumber.isNotEmpty
           ? 'Watcher-v$cleanVer-build$buildNumber.apk'
@@ -362,12 +383,12 @@ class AppUpdateService {
       return AppReleaseInfo(
         tagName: tagName,
         version: rawVersionText,
-        title: 'Watcher $tagName',
+        title: 'Watcher v$cleanVer',
         releaseNotes: releaseNotes.isNotEmpty
             ? releaseNotes
             : 'Latest release from GitHub repository.',
         publishedAt: DateTime.now(),
-        htmlUrl: 'https://github.com/$repoFullName/releases',
+        htmlUrl: 'https://github.com/$repoFullName/releases/latest',
         apkDownloadUrl: apkDownloadUrl,
         apkName: apkName,
       );
